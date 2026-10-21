@@ -398,9 +398,8 @@ const verbPrepRule: RuleFn = (tokens) => {
       const s = span(i, i + 1);
       out.push(issue('PREP-006', 'style', s.start, s.end,
         `“${cur} back” — “back” is redundant.`,
-        `“${cur === 'return' ? 'Return' : 'Reply'}” already contains the idea of coming back or answering.`,
-        cur,
-      );
+        `“${cur === 'return' ? 'Return' : 'Revert'}” already contains the idea of coming back or answering.`,
+        cur));
     }
     const info = tokens[i + 1];
     if (info && DETERMINERS.has(info.word)) {
