@@ -81,6 +81,12 @@ const THIRD_SINGULAR_MAP: Record<string, string> = {
 const OBJECT_PRONOUN_MAP: Record<string, string> = {
   i: 'me', he: 'him', she: 'her', we: 'us', they: 'them',
 };
+
+/** Words allowed between a preposition and the following connector chain. */
+const CONJUNCT_SKIP = new Set([
+  'you', 'me', 'him', 'her', 'us', 'them', 'the', 'my', 'our', 'your', 'his',
+  'their', 'this', 'that',
+]);
 const MODALS = new Set([
   'can', 'could', 'will', 'would', 'shall', 'should', 'may', 'might', 'must',
   "can't", "won't", "couldn't", "wouldn't", "shouldn't",
@@ -277,16 +283,17 @@ const pronounCaseRule: RuleFn = (tokens) => {
     const cur = tokens[i];
     const prevW = i > 0 ? tokens[i - 1].word : '';
     const prev2W = i > 1 ? tokens[i - 2].word : '';
-    // look left past connector words for a preposition (between you and I, for me and you)
+    // look left past connectors and a single closed-class skip word:
+    // “between you and I”, “for me and you”
     let prepSeen = PREP_BEFORE_OBJ.has(prevW);
     if (!prepSeen && (prevW === 'and' || prevW === 'or')) {
-      for (let j = i - 2; j >= 0 && j >= i - 5; j--) {
+      for (let j = i - 2; j >= i - 4 && j >= 0; j--) {
         const w = tokens[j].word;
         if (PREP_BEFORE_OBJ.has(w)) {
           prepSeen = true;
           break;
         }
-        if (!(w === 'and' || w === 'or')) break;
+        if (!CONJUNCT_SKIP.has(w)) break; // only skip authored closed-class words
       }
     }
     if (!prepSeen) continue;

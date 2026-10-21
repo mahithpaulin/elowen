@@ -70,17 +70,17 @@ describe('checkGrammar — pronoun case (PRN-001)', () => {
 
 describe('checkGrammar — time/article & day patterns (ART/PREP)', () => {
   it('wrong day/month preps flagged; correct ones left alone', () => {
-    expect(checkGrammar('in Monday we visited the museum').issues.some((i) => i.ruleId === 'ART-001')).toBe(true);
-    expect(checkGrammar('at Monday five am we cook').issues.some((i) => i.ruleId === 'ART-001')).toBe(true);
-    expect(checkGrammar('on Monday we visited the museum').issues.some((i) => i.ruleId.startsWith('ART-'))).toBe(false);
-    expect(checkGrammar('last Monday we visited the museum').issues).toHaveLength(0);
+    expect(checkGrammar('In Monday we visited the museum.').issues.some((i) => i.ruleId === 'ART-001')).toBe(true);
+    expect(checkGrammar('At Monday five am we cook kid.').issues.some((i) => i.ruleId === 'ART-001')).toBe(true);
+    expect(checkGrammar('On Monday we visited the museum.').issues.some((i) => i.ruleId.startsWith('ART-'))).toBe(false);
+    expect(checkGrammar('Last Monday we visited the museum.').issues).toHaveLength(0);
   });
   it('discuss about flagged (PREP)', () => {
     expect(checkGrammar('i will discuss about the plan').issues.some((i) => i.ruleId.startsWith('PREP-'))).toBe(true);
   });
   it('explain me flagged, explain to me not', () => {
-    expect(checkGrammar('please explain me the sum').issues.some((i) => i.ruleId.startsWith('PREP-'))).toBe(true);
-    expect(checkGrammar('please explain to me the sum').issues).toHaveLength(0);
+    expect(checkGrammar('Please explain me the sum.').issues.some((i) => i.ruleId.startsWith('PREP-'))).toBe(true);
+    expect(checkGrammar('Please explain to me the sum.').issues).toHaveLength(0);
   });
 });
 
