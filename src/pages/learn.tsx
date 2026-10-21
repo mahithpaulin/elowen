@@ -7,8 +7,7 @@ import { ExerciseDeck, LessonSummary } from '../features/curriculum/ExerciseDeck
 /** Learn: curriculum browser. */
 export function LearnPage() {
   const snap = getSnapshot();
-  const level: 'beginner' | 'intermediate' = 'beginner';
-  const [tab, setTab] = useState<typeof level>('beginner');
+  const [tab, setTab] = useState<'beginner' | 'intermediate'>('beginner');
 
   return (
     <>
@@ -99,7 +98,6 @@ export function LessonPage({ unitId, lessonId }: { unitId: string; lessonId: str
       {done ? (
         <LessonSummary
           percent={done.percent}
-          total={done.total}
           topic={lesson.topic}
           onRetry={() => {
             setDone(null);

@@ -59,6 +59,7 @@ export function SpeakingPage() {
         transcript: text || null,
         similarity: sim,
         report: report2,
+        asrEngine: asr.engineId,
       });
     } catch (e) {
       window.alert(`Transcription failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -325,3 +326,12 @@ function float32ToWav(samples: Float32Array, sampleRate: number): ArrayBuffer {
   }
   return buf;
 }
+
+const selectStyle: React.CSSProperties = {
+  border: '1px solid var(--line)',
+  borderRadius: 10,
+  padding: '8px 10px',
+  background: '#fffef9',
+  color: 'var(--ink)',
+  maxWidth: '100%',
+};

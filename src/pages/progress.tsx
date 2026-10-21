@@ -49,7 +49,7 @@ export function ProgressPage() {
           {topic.length === 0 ? (
             <EmptyState title="No scored activity yet" note="Complete lessons, labs or readings to fill this chart." />
           ) : (
-            <BarChart data={topic.map((t) => ({ x: t.topic, y: Math.round(t.avg) }))} max={100} />
+            <BarChart items={topic.map((t) => ({ label: t.topic, value: Math.round(t.avg) }))} max={100} />
           )}
         </Card>
 
@@ -66,7 +66,7 @@ export function ProgressPage() {
               }
             />
           ) : (
-            <LineChart data={hwTrend} max={100} />
+            <LineChart points={hwTrend} max={100} />
           )}
         </Card>
 
@@ -78,7 +78,7 @@ export function ProgressPage() {
               note="Enable the optional offline recogniser in the Speaking Lab; audio-only runs do not produce a word-match score."
             />
           ) : (
-            <LineChart data={spTrend} max={100} />
+            <LineChart points={spTrend} max={100} />
           )}
         </Card>
 

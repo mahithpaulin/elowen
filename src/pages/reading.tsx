@@ -91,7 +91,6 @@ function PassageReader({ passageIdc }: { passageIdc: string }) {
         <>
           <LessonSummary
             percent={done.percent}
-            total={done.total}
             topic="reading"
             onRetry={() => setDone(null)}
           />

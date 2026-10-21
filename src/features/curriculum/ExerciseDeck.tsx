@@ -177,12 +177,10 @@ function Feedback({
 
 export function LessonSummary({
   percent,
-  total,
   topic,
   onRetry,
 }: {
   percent: number;
-  total: number;
   topic: string;
   onRetry: () => void;
 }) {

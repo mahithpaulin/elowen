@@ -25,19 +25,23 @@ function speechLike(seconds: number): Float32Array {
 }
 
 describe('VAD segmentation', () => {
-  it('pure silence is one silent region with no speech', () => {
+  it('pure silence produces zero speech frames', () => {
     const mask = vad(silence(2), SR);
-    expect(mask.speech).toHaveLength(0);
-    expect(mask.silence.length).toBeGreaterThan(0);
+    let speech = 0;
+    for (let i = 0; i < mask.frames.length; i++) speech += mask.frames[i];
+    expect(speech).toBe(0);
   });
-  it('speech-like bursts appear as speech segments', () => {
+  it('speech-like bursts raise enough speech frames', () => {
     const mask = vad(speechLike(2), SR);
-    expect(mask.speech.length).toBeGreaterThanOrEqual(2);
+    let speech = 0;
+    for (let i = 0; i < mask.frames.length; i++) speech += mask.frames[i];
+    expect(speech * (mask.hop / SR)).toBeGreaterThan(0.7);
   });
-  it('hysteresis keeps short dips inside one segment', () => {
-    const mask = vad(speechLike(2), SR);
-    const text = describeActivity(mask, speechLike(2), SR);
-    expect(text.pauseCount).toBeLessThan(mask.speech.length + 2);
+  it('described activity splits speech vs silence', () => {
+    const samples = speechLike(2);
+    const activity = describeActivity(vad(samples, SR), samples, SR);
+    expect(activity.speechS).toBeGreaterThan(0.5);
+    expect(activity.silenceS).toBeGreaterThan(0.4);
   });
 });
 

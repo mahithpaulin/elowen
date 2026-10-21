@@ -17,7 +17,7 @@ import * as db from './db';
 import { levelFromXp, streakFromEvents, topicAccuracy, xpRangeForLevel } from '../engines/scoring/scoring';
 
 export { xpRangeForLevel, topicAccuracy, levelFromXp };
-import { isDue } from '../engines/srs/srs';
+import { isDue } from '../engines/srs';
 import { todayKey } from '../utils';
 import { UNITS, INTERMEDIATE_UNITS } from '../data/curriculum/units';
 import { WORDS } from '../data/vocabulary/words';
@@ -209,7 +209,7 @@ export function lessonById(id: string) {
 }
 
 /** Next unstarted (or incomplete) lesson in a flat curriculum order. */
-export function nextLessonTarget(events: ActivityEvent[], lessons: LessonProgress[]): string | null {
+export function nextLessonTarget(_events: ActivityEvent[], lessons: LessonProgress[]): string | null {
   const completed = new Set(lessons.filter((l) => l.best >= 80).map((l) => l.lessonId));
   for (const u of ALL_UNITS) for (const l of u.lessons) {
     if (!completed.has(l.id)) return `${u.id}/${l.id}`;

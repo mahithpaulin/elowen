@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useHashRoute, navigate } from './router';
-import { getSnapshot, subscribe } from '../storage/appstore';
-import { totalXp, levelFromXp } from '../engines/scoring/scoring';
+import { getSnapshot, subscribe, totalXp } from '../storage/appstore';
+import { levelFromXp } from '../engines/scoring/scoring';
 
 const NAV = [
   { to: '/dashboard', label: 'Dashboard', glyph: '⌂' },

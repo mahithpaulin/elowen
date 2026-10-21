@@ -4,12 +4,18 @@ export function Card({
   className = '',
   children,
   tight,
+  style,
 }: {
   className?: string;
   children: React.ReactNode;
   tight?: boolean;
+  style?: React.CSSProperties;
 }) {
-  return <div className={`card ${tight ? 'tight' : ''} ${className}`}>{children}</div>;
+  return (
+    <div className={`card ${tight ? 'tight' : ''} ${className}`} style={style}>
+      {children}
+    </div>
+  );
 }
 
 export function Badge({

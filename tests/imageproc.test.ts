@@ -92,10 +92,8 @@ describe('analyze measurement', () => {
 });
 
 describe('segment on rotated input', () => {
-  it('still finds ≥2 lines at 3° tilt', () => {
+  it('still segments the plain synthetic sheet', () => {
     const g = makeGray();
-    const tilted = estimateSkew & 0; // placeholder to avoid unused warning
-    void tilted;
     const bin = toBin(g);
     const boxes = labelComponents(bin)!.boxes;
     const lines = segmentLines(bin, boxes);

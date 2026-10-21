@@ -7,9 +7,9 @@ describe('tokenise + coreWord', () => {
   it('keeps offsets pointing at original text', () => {
     const toks = tokenise('My name is.');
     const name = toks[1]!;
-    expect(toks[1]!.text.toLowerCase()).toBe('name');
-    expect(name.start).toBe(3);
-    expect(name.end).toBe(7);
+    expect(name.text.toLowerCase()).toBe('name');
+    expect(name.offset).toBe(3);
+    expect(name.offset + name.text.length).toBe(7);
   });
   it('coreWord strips punctuation and lowercases', () => {
     expect(coreWord('Morning,')).toBe('morning');

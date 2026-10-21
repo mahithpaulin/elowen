@@ -47,7 +47,7 @@ interface TessWorker {
 
 interface RecognizeData {
   data: {
-    words?: Array<{ text?: string; confidence?: number }>;
+    words?: Array<{ text?: string; confidence?: number; bbox?: { x0: number; y0: number; x1: number; y1: number } }>;
     text?: string;
   };
 }
@@ -86,7 +86,7 @@ export class TesseractAdapter implements HandwritingRecognizer {
     return this._status;
   }
 
-  async init(): Promise<void> {
+  async init(_html?: HTMLElement): Promise<void> {
     if (this._status.state === 'ready') return;
     if (this.inflight) return this.inflight;
     this._status = { state: 'loading', message: 'Downloading the OCR engine (~40 MB, one-time per session)…' };
@@ -120,7 +120,7 @@ export class TesseractAdapter implements HandwritingRecognizer {
     for (const wd of res.data.words ?? []) {
       const text = (wd.text ?? '').trim();
       const conf = typeof wd.confidence === 'number' ? wd.confidence : 0;
-      if (text) words.push({ text, confidence: conf });
+      if (text) words.push({ text, confidence: conf, bbox: wd.bbox ?? { x0: 0, y0: 0, x1: 0, y1: 0 } });
     }
     return words;
   }

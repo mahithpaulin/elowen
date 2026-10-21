@@ -368,8 +368,19 @@ function measureCanvas(c: HTMLCanvasElement): { output: AnalyzeOutput; bin: BinI
   const bin = adaptiveThreshold(grayLevel);
   const measures = measure(bin);
   const scores = scoreResult(measures, quality);
+  const metrics = {
+    lineCount: measures.lineCount,
+    letterHeightCV: measures.letterHeightCV,
+    wordGapCV: measures.wordGapCV,
+    lineSpacingCV: measures.lineSpacingCV,
+    baselineSlopeRMS: measures.baselineSlopeRMS,
+    slantDeg: measures.slantDeg,
+    slantReliable: measures.slantReliable,
+    inkCoverage: measures.inkCoverage,
+  };
   const out: AnalyzeOutput = {
     quality,
+    metrics,
     scores,
     overall: overallScore(scores),
     width: c.width,

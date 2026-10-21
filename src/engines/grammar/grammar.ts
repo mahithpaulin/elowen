@@ -128,7 +128,7 @@ function issue(
   explanation: string,
   suggestion?: string,
 ): GrammarIssue {
-  return { ruleId, severity, start, end, message, explanation, suggestion };
+  return { ruleId, severity, start, end, excerpt: '', message, explanation, suggestion };
 }
 
 /** S-V copular agreement: he are → is, they is → are, he have → has, … */
@@ -501,7 +501,7 @@ const repeatedPunctRule = (text: string): GrammarIssue[] => {
 };
 
 /** Sentence starts and the pronoun “I”. */
-const capitalisationRule = (text: string, tokens: Token[]): GrammarIssue[] => {
+const capitalisationRule = (_text: string, tokens: Token[]): GrammarIssue[] => {
   const out: GrammarIssue[] = [];
   for (const t of tokens) {
     if (t.sentenceStart && /^[\p{Ll}]{2}/u.test(t.text)) {
@@ -590,7 +590,7 @@ export function checkGrammar(text: string): GrammarResult {
   const seen = new Map<string, GrammarIssue>();
   for (const it of issues) {
     const key = `${it.ruleId}@${it.start}-${it.end}`;
-    if (!seen.has(key)) seen.set(key, it);
+    if (!seen.has(key)) seen.set(key, { ...it, excerpt: trimmed.slice(it.start, it.end) });
   }
   return {
     issues: [...seen.values()].sort((a, b) => a.start - b.start),
