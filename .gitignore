@@ -6,3 +6,6 @@ dist-ssr/
 *.log
 coverage/
 .vite/
+.vercel
+.env*
+dist-local/
