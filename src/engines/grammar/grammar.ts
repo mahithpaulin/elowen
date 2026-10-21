@@ -10,7 +10,8 @@ export interface Token {
   sentenceStart: boolean;
 }
 
-const TRIM_CHARS = '.,;:!?…"\u201c\u201d\u2018\u2019()[]{}[]{}\\/-';
+/* NOTE: brackets are escaped — an unescaped `]` would close the class early. */
+const TRIM_CHARS = '.,;:!?…"\u201c\u201d\u2018\u2019()\\[\\]{}\\/-';
 const TRIM_RE = new RegExp(`^[${TRIM_CHARS}]+|[${TRIM_CHARS}]+$`, 'g');
 
 export function coreWord(text: string): string {
@@ -276,7 +277,8 @@ const pronounCaseRule: RuleFn = (tokens) => {
     const cur = tokens[i];
     const prevW = i > 0 ? tokens[i - 1].word : '';
     const prev2W = i > 1 ? tokens[i - 2].word : '';
-    const afterPrep = PREP_BEFORE_OBJ.has(prevW) || (prevW === 'and' && PREP_BEFORE_OBJ.has(prev2W));
+    const afterPrep =
+      PREP_BEFORE_OBJ.has(prevW) || ((prevW === 'and' || prevW === 'or') && PREP_BEFORE_OBJ.has(prev2W));
     if (!afterPrep) continue;
     const wanted = OBJECT_PRONOUN_MAP[cur.word];
     if (!wanted) continue;

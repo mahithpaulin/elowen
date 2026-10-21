@@ -9,6 +9,8 @@ export const WORD_SET: Set<string> = new Set([
 export const MISSPELLINGS: Record<string, string> = {
   acheive: 'achieve',
   adress: 'address',
+  recieve: 'receive',
+  tommorrow: 'tomorrow',
   agressive: 'aggressive',
   alot: 'a lot',
   amature: 'amateur',
@@ -40,6 +42,7 @@ export const MISSPELLINGS: Record<string, string> = {
   foriegn: 'foreign',
   fourty: 'forty',
   freind: 'friend',
+  gaurd: 'guard',
   goverment: 'government',
   grammer: 'grammar',
   garantee: 'guarantee',

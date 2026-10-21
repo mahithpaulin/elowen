@@ -60,9 +60,8 @@ export function normaliseText(s: string): string {
   return s
     .toLowerCase()
     .replace(/[\u2019]/g, "'")
+    .replace(/[.,;:!?…"'()[\]]/g, ' ')
     .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/[.。!?]+$/u, '')
     .trim();
 }
 

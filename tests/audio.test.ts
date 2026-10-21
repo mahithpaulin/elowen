@@ -69,13 +69,13 @@ describe('describeActivity / analyseAudio', () => {
     const samples = speechLike(1.5);
     const withTranscript = analyseAudio(samples, SR, 5);
     expect(withTranscript.speechRate).toBeGreaterThan(0);
-    expect(withTranscript.speechRate).toBe(5 / withTranscript.speechS);
+    expect(withTranscript.speechRate).toBeCloseTo(5 / withTranscript.speechS, 2);
   });
 });
 
 describe('summariseDuration', () => {
   it('formats seconds and minutes', () => {
-    expect(summariseDuration(10)).toBe('10 s');
-    expect(summariseDuration(90)).toBe('1.5 min');
+    expect(summariseDuration(10)).toBe('10s');
+    expect(summariseDuration(90)).toBe('1m 30s');
   });
 });

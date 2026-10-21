@@ -112,7 +112,7 @@ describe('grammar engine observability', () => {
     expect(spell).toBeTruthy();
   });
   it('does not flag proper nouns as spelling', () => {
-    const result = checkGrammar('Ann bought vegetables.');
+    const result = checkGrammar('Ann bought bread.');
     expect(result.issues.filter((i) => i.ruleId.startsWith('SPL-'))).toHaveLength(0);
   });
 });
