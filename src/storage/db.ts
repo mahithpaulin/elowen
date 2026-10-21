@@ -5,6 +5,7 @@
 
 export const DB_NAME = 'elowen';
 export const DB_VERSION = 1;
+export const SESSION_KEY = 'elowen.session';
 
 export type StoreName =
   | 'events'
@@ -19,29 +20,60 @@ export interface HandwrittenOpen {
   db: IDBDatabase;
 }
 
+const ALL_STORES: StoreName[] = ['events', 'lessons', 'srs', 'handwriting', 'speaking', 'reading', 'kv'];
+
 let dbPromise: Promise<IDBDatabase> | null = null;
 
-export function openDb(): Promise<IDBDatabase> {
-  if (dbPromise) return dbPromise;
-  dbPromise = new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onupgradeneeded = () => {
-      const db = req.result;
-      if (!db.objectStoreNames.contains('events')) {
-        const s = db.createObjectStore('events', { keyPath: 'id' });
-        s.createIndex('ts', 'ts');
-        s.createIndex('kind', 'kind');
+/** The guest database has no suffix; an account's database is namespaced by its Google `sub`. */
+export function activeDbName(): string {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    if (raw) {
+      const session = JSON.parse(raw) as { sub?: string };
+      if (typeof session.sub === 'string' && /^[A-Za-z0-9_-]{3,64}$/.test(session.sub)) {
+        return `${DB_NAME}.${session.sub}`;
       }
-      for (const name of ['lessons', 'srs', 'reading', 'handwriting', 'speaking', 'kv'] as StoreName[]) {
-        if (!db.objectStoreNames.contains(name)) {
-          db.createObjectStore(name, name === 'kv' ? undefined : { keyPath: keyFor(name) });
-        }
-      }
-    };
+    }
+  } catch {
+    /* corrupt session → guest */
+  }
+  return DB_NAME;
+}
+
+function upgrade(db: IDBDatabase): void {
+  if (!db.objectStoreNames.contains('events')) {
+    const s = db.createObjectStore('events', { keyPath: 'id' });
+    s.createIndex('ts', 'ts');
+    s.createIndex('kind', 'kind');
+  }
+  for (const name of ['lessons', 'srs', 'reading', 'handwriting', 'speaking', 'kv'] as StoreName[]) {
+    if (!db.objectStoreNames.contains(name)) {
+      db.createObjectStore(name, name === 'kv' ? undefined : { keyPath: keyFor(name) });
+    }
+  }
+}
+
+/** Opens a database by exact name, creating the standard schema if needed. */
+export function openDbNamed(name: string): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(name, DB_VERSION);
+    req.onupgradeneeded = () => upgrade(req.result);
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error ?? new Error('IndexedDB open failed'));
   });
+}
+
+export function openDb(): Promise<IDBDatabase> {
+  if (dbPromise) return dbPromise;
+  dbPromise = openDbNamed(activeDbName());
   return dbPromise;
+}
+
+/** forgetName caches so a namespace switch (account change) opens the other DB. */
+export function resetDbCache(): Promise<void> {
+  const old = dbPromise;
+  dbPromise = null;
+  return old ? old.then((db) => db.close()) : Promise.resolve();
 }
 
 function keyFor(name: StoreName): string | null {
@@ -125,7 +157,7 @@ export async function clearStore(store: StoreName): Promise<void> {
 }
 
 export async function wipeAll(): Promise<void> {
-  for (const s of ['events', 'lessons', 'srs', 'handwriting', 'speaking', 'reading', 'kv'] as StoreName[]) {
+  for (const s of ALL_STORES) {
     await clearStore(s);
   }
 }

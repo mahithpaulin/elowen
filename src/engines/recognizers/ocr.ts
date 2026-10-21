@@ -16,8 +16,9 @@
 
 import type { OcrWord } from '../../types';
 
-const TESSERACT_CDN =
-  'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
+export const OCR_URL = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
+
+const TESSERACT_CDN = OCR_URL;
 
 export type RecognizerStatus =
   | { state: 'idle' }

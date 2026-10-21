@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { useHashRoute, navigate } from './router';
 import { getSnapshot, subscribe, totalXp } from '../storage/appstore';
 import { levelFromXp } from '../engines/scoring/scoring';
+import { getSession } from '../storage/accounts';
+import { canInstall, onInstallAvailability, showInstall } from './pwa';
 
 const NAV = [
   { to: '/dashboard', label: 'Dashboard', glyph: '⌂' },
@@ -24,10 +26,18 @@ function useStateKey(): [{}, (v: {}) => void] {
 export function Shell({ children }: { children: React.ReactNode }) {
   const { path, parts } = useHashRoute();
   const [drawer, setDrawer] = useState(false);
+  const [installable, setInstallable] = useState(() => canInstall());
   const [, reset] = useStateKey();
   const snap = getSnapshot();
+  const account = getSession();
   useEffect(() => subscribe(() => reset({})), []);
   useEffect(() => setDrawer(false), [path]);
+  useEffect(onInstallAvailability(() => setInstallable(canInstall())), []);
+
+  const install = async () => {
+    const outcome = await showInstall();
+    if (outcome === 'unavailable') navigate('/settings');
+  };
 
   // auto-seed demo path check
   const xp = totalXp(snap.events);
@@ -60,10 +70,28 @@ export function Shell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
         <ul className="nav">{NAV.map(link)}</ul>
+        {installable ? (
+          <button className="btn accent small" style={{ margin: '10px 11px 0' }} onClick={install}>
+            ⤓ Install as app
+          </button>
+        ) : null}
+        {account ? (
+          <div className="row" style={{ margin: '12px 11px 0', gap: 8 }}>
+            {account.picture ? (
+              <img
+                src={account.picture}
+                alt=""
+                width={26}
+                height={26}
+                style={{ borderRadius: '50%', border: '1px solid rgba(255,255,255,0.3)' }}
+              />
+            ) : null}
+            <span style={{ fontSize: '0.78rem', color: '#d8e4dd' }}>{account.name}</span>
+          </div>
+        ) : null}
         <div className="foot">
           Level {level} · {xp} learn moment{xp === 1 ? '' : 's'} collected.
-          <br />
-          All data stays on this device.
+          {account ? <><br />Storage: {account.email} (this device)</> : <><br />All data stays on this device.</>}
         </div>
       </aside>
       {drawer ? (
