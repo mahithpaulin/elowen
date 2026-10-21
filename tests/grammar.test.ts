@@ -79,8 +79,8 @@ describe('checkGrammar — time/article & day patterns (ART/PREP)', () => {
     expect(checkGrammar('i will discuss about the plan').issues.some((i) => i.ruleId.startsWith('PREP-'))).toBe(true);
   });
   it('explain me flagged, explain to me not', () => {
-    expect(checkGrammar('Please explain me the sum.').issues.some((i) => i.ruleId.startsWith('PREP-'))).toBe(true);
-    expect(checkGrammar('Please explain to me the sum.').issues).toHaveLength(0);
+    expect(checkGrammar('Please explain me this plan.').issues.some((i) => i.ruleId.startsWith('PREP-'))).toBe(true);
+    expect(checkGrammar('Please explain to me this plan.').issues).toHaveLength(0);
   });
 });
 
