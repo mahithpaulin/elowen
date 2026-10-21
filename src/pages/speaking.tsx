@@ -39,6 +39,7 @@ export function SpeakingPage() {
       transcript: null,
       similarity: null,
       report: first,
+      asrEngine: null,
     });
   };
 
