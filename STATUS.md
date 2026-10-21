@@ -4,7 +4,7 @@ Updated: 2026-10-21
 
 ## Current
 
-Phase: **CI-green build verified** as of 2026-10-21 (run #39556112528).
+Phase: **CI-green build verified, repository public** as of 2026-10-21 (run #39556112528).
 `npm ci`, `tsc --noEmit`, vitest suite (`tests/`, 7 files), and `vite build`
 all pass in Actions on every push. The static site is produced as the
 `elowen-dist` artifact (~134 KB) from the production build.
