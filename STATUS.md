@@ -4,10 +4,10 @@ Updated: 2026-10-21
 
 ## Current
 
-Phase: code complete, **pre-verification**. All source pages, engines, data and
-tests are written; the first CI run (typecheck + tests + build) has not
-happened yet — the phone has no node_modules by user rule, so CI is the only
-verifier.
+Phase: **CI-green build verified** as of 2026-10-21 (run #39556112528).
+`npm ci`, `tsc --noEmit`, vitest suite (`tests/`, 7 files), and `vite build`
+all pass in Actions on every push. The static site is produced as the
+`elowen-dist` artifact (~134 KB) from the production build.
 
 ## Done
 
@@ -32,21 +32,30 @@ verifier.
 
 ## Not done yet
 
-- First CI run: `npm ci && npm run typecheck && npm test && npm run build`.
-- `git init` / private repo / push (next action).
 - Manual device pass for: camera capture, mic permission flow, canvas
-  pointer input across devices, CDN engine loads (documented, not CI-able).
+  pointer input across devices, CDN engine loads (documented in-app; CI
+  cannot exercise them).
 - Deployment decision (Vercel Hobby etc.) — needs user sign-off (publishing
   rule).
 
-## Expected first-run friction
+## CI history (local-run of the loop)
 
-Known mismatch candidates for the initial CI push (will be fixed on CI
-feedback): strict-mode unused imports in older engine files, exact rule IDs
-in tests (PUN-001, TEN-004 wording), measure() on synthetic image CV gates,
-and `srsUpdate` clamped-ease edges. Watch `gh run watch` and iterate.
+Runs and what each round taught (each ~1 push):
+1. `39549961893` first failure — truncated `out.push(` in PREP-006.
+2. `39552466995` 27 strict errors — Token offset API, chart props
+   (`items`/`points`), `metrics` field, session fields, srs module path,
+   excerpt fill, re-exports from appstore.
+3. `39553632976`/`39553948046` missing `asrEngine` field once more.
+4. `39554999905` → `39555520157` → `39555852407` → `39556112528` GREEN:
+   the substantive finds were (a) the TRIM_CHARS regex class was silently
+   wrong because an unescaped `]` closed it early — commas and trailing
+   punctuation survived token cleanup; (b) streaks keep a yesterday-run
+   alive until today closes (documented in tests); (c) sentence-start words
+   are skipped by the spelling rule; (d) "explain me" fires PREP-009, and
+   PRN-001 looks left past authored connector-skip words for its
+   preposition ("between you and I").
 
 ## Next action
 
-git init → commit → `gh repo create mahithpaulin/elowen --private` → push →
-watch CI → fix until green → only then classify features in the final report.
+Real-device checks (camera/mic/canvas/CDN engine init), then deployment
+after the user approves.
