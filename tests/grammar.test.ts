@@ -28,7 +28,7 @@ describe('baseFormOf', () => {
   });
   it('returns null for unknown or base forms', () => {
     expect(baseFormOf('water')).toBeNull();
-    expect(baseFormOf('walk')).toBe('walk');
+    expect(baseFormOf('walk')).toBeNull(); // no inflection marker → nothing to reverse
   });
 });
 
@@ -69,8 +69,10 @@ describe('checkGrammar — pronoun case (PRN-001)', () => {
 });
 
 describe('checkGrammar — time/article & day patterns (ART/PREP)', () => {
-  it('on monday flagged (ART-001 family)', () => {
-    expect(checkGrammar('on Monday we visited the museum').issues.some((i) => i.ruleId.startsWith('ART-'))).toBe(true);
+  it('wrong day/month preps flagged; correct ones left alone', () => {
+    expect(checkGrammar('in Monday we visited the museum').issues.some((i) => i.ruleId === 'ART-001')).toBe(true);
+    expect(checkGrammar('at Monday five am we cook').issues.some((i) => i.ruleId === 'ART-001')).toBe(true);
+    expect(checkGrammar('on Monday we visited the museum').issues.some((i) => i.ruleId.startsWith('ART-'))).toBe(false);
     expect(checkGrammar('last Monday we visited the museum').issues).toHaveLength(0);
   });
   it('discuss about flagged (PREP)', () => {

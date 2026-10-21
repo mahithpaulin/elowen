@@ -11,7 +11,7 @@ export interface Token {
 }
 
 /* NOTE: brackets are escaped — an unescaped `]` would close the class early. */
-const TRIM_CHARS = '.,;:!?…"\u201c\u201d\u2018\u2019()\\[\\]{}\\/-';
+const TRIM_CHARS = ".,;:!?…\"'\u201c\u201d\u2018\u2019()\\[\\]{}\\/-";
 const TRIM_RE = new RegExp(`^[${TRIM_CHARS}]+|[${TRIM_CHARS}]+$`, 'g');
 
 export function coreWord(text: string): string {
@@ -277,9 +277,19 @@ const pronounCaseRule: RuleFn = (tokens) => {
     const cur = tokens[i];
     const prevW = i > 0 ? tokens[i - 1].word : '';
     const prev2W = i > 1 ? tokens[i - 2].word : '';
-    const afterPrep =
-      PREP_BEFORE_OBJ.has(prevW) || ((prevW === 'and' || prevW === 'or') && PREP_BEFORE_OBJ.has(prev2W));
-    if (!afterPrep) continue;
+    // look left past connector words for a preposition (between you and I, for me and you)
+    let prepSeen = PREP_BEFORE_OBJ.has(prevW);
+    if (!prepSeen && (prevW === 'and' || prevW === 'or')) {
+      for (let j = i - 2; j >= 0 && j >= i - 5; j--) {
+        const w = tokens[j].word;
+        if (PREP_BEFORE_OBJ.has(w)) {
+          prepSeen = true;
+          break;
+        }
+        if (!(w === 'and' || w === 'or')) break;
+      }
+    }
+    if (!prepSeen) continue;
     const wanted = OBJECT_PRONOUN_MAP[cur.word];
     if (!wanted) continue;
     out.push(
@@ -416,12 +426,21 @@ const verbPrepRule: RuleFn = (tokens) => {
     }
     if (['explain', 'describe', 'mention'].includes(cur)) {
       const p = tokens[i + 1];
-      if (p && OBJECT_PRONOUN_MAP[p.word]) {
+      if (p && (OBJECT_PRONOUN_MAP[p.word] || ['me', 'him', 'her', 'us', 'them'].includes(p.word))) {
         const s = span(i, i + 1);
-        out.push(issue('PREP-008', 'error', s.start, s.end,
-          `“${cur} ${p.word}” → “${cur} to ${p.word}”.`,
-          `Use “to” before the person: explain/mention/describe to me.`,
-          `${cur} to`));
+        if (OBJECT_PRONOUN_MAP[p.word]) {
+          // subject form used directly after the verb: explain I → explain to me
+          out.push(issue('PREP-008', 'error', s.start, s.end,
+            `“${cur} ${p.word}” → “${cur} to ${OBJECT_PRONOUN_MAP[p.word]}”.`,
+            `Use “to” before the person: explain/mention/describe to me.`,
+            `${cur} to`));
+        } else {
+          // object pronoun without the preposition: explain me → explain to me
+          out.push(issue('PREP-009', 'error', s.start, s.end,
+            `“${cur} ${p.word}” → “${cur} to ${p.word}”.`,
+            `The verb takes “to” before a person: explain to me, describe to us.`,
+            `${cur} to`));
+        }
       }
     }
   }
@@ -544,7 +563,8 @@ const spellingRule: RuleFn = (tokens) => {
       continue;
     }
 
-    // proper noun / CamelCase guard, and possessives of dictionary words
+    // proper noun / sentence-start guard: any leading capital is skipped
+    if (/^\p{Lu}/u.test(t.text)) continue;
     if (/[\p{Lu}]/u.test(t.text.slice(1))) continue;
     if (t.word.endsWith("'s") && WORD_SET.has(t.word.slice(0, -2))) continue;
     const alt = likelyMisspelled(t.word);

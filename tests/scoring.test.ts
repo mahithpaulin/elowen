@@ -33,8 +33,9 @@ describe('streakFromEvents', () => {
     const events = [ev(0), ev(1), ev(2), ev(4)];
     expect(streakFromEvents(events)).toBe(3);
   });
-  it('is 0 without an event today', () => {
-    expect(streakFromEvents([ev(1), ev(2)])).toBe(0);
+  it('keeps a yesterday-run alive until today closes without a new event', () => {
+    expect(streakFromEvents([ev(1), ev(2)])).toBe(2);
+    expect(streakFromEvents([ev(2), ev(3)])).toBe(0);
   });
 });
 
