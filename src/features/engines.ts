@@ -53,6 +53,10 @@ export const ENGINES: EngineDef[] = [
   },
 ];
 
+export async function clearEngineCache(): Promise<void> {
+  await caches.delete(ENGINE_CACHE);
+}
+
 /** Reports whether every URL of an engine is already in the offline cache. */
 export async function engineInstalled(def: EngineDef): Promise<boolean> {
   try {

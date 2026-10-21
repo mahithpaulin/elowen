@@ -159,7 +159,7 @@ function AccountCard({
               type="checkbox"
               defaultChecked
               onChange={(e) => {
-                const host = e.currentTarget.closest('.card')?.querySelector('[data-migrate]');
+                const host = btnHost;
                 if (host) host.dataset.migrate = String(e.target.checked);
               }}
             />
