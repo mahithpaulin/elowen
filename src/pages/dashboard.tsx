@@ -6,12 +6,13 @@ import {
   xpRangeForLevel,
   nextLessonTarget,
   topicAccuracy,
+  isDemoEvent,
   ALL_UNITS,
   lessonById,
 } from '../storage/appstore';
 import { Card, Stat, Button, Eyebrow, EmptyState, DemoBanner, Progress, Callout } from '../components/ui';
 import { navigate } from '../app/router';
-import { toLevelPct } from './helpers';
+import { parseLessonTarget, toLevelPct } from './helpers';
 import type { LessonData, UnitData } from '../types';
 
 /** Dashboard: overview, streak, stats and deterministic recommendations. */
@@ -23,11 +24,15 @@ export function DashboardPage() {
   const streakDays = streak(snap.events);
   const recs = computeRecommendations(snap);
   const lessonsDone = snap.lessons.filter((l) => l.best >= 80).length;
+  // The tour shows the sample data on purpose; the banner says so, and the
+  // Progress page keeps the averages strictly to real work.
   const weakTopic = topicAccuracy(
     snap.events.filter((e) => e.score != null && e.ts > Date.now() - 14 * 86400000),
   )[0];
   const nextTarget = nextLessonTarget(snap.events, snap.lessons);
   const nextLesson = nextTarget ? targetToLesson(nextTarget) : null;
+  const hasDemo = snap.events.some((e) => isDemoEvent(e));
+  const todayCount = snap.events.filter((e) => e.ts > Date.now() - 86400000).length;
 
   return (
     <>
@@ -41,7 +46,7 @@ export function DashboardPage() {
         </div>
       </div>
 
-      {snap.events.some((e) => e.kind === 'demo') ? <DemoBanner /> : null}
+      {hasDemo ? <DemoBanner /> : null}
 
       <div className="grid2">
         <Card>
@@ -50,7 +55,7 @@ export function DashboardPage() {
             <>
               <h3>{nextLesson.lesson.title}</h3>
               <p className="muted">{nextLesson.unit.title}</p>
-              <Button primary onClick={() => navigate(nextTarget!)} type="button">
+              <Button primary onClick={() => navigate(nextTarget)} type="button">
                 Open lesson →
               </Button>
             </>
@@ -82,6 +87,7 @@ export function DashboardPage() {
             <Callout>
               Topic average {Math.round(weakTopic.avg)}% on {weakTopic.topic}. Keep the loop going —
               consistency beats cramming.
+              {hasDemo ? ' (Sample data is included in these numbers.)' : ''}
             </Callout>
           ) : (
             <p className="tiny">Scores appear once you finish lessons or labs.</p>
@@ -123,6 +129,11 @@ export function DashboardPage() {
             Handwriting runs image processing locally; Speaking records and analyses audio
             in the browser, with an optional one-time download of an offline recogniser.
           </p>
+          <p className="tiny" style={{ marginTop: 6 }}>
+            {todayCount > 0
+              ? `${todayCount} recorded item${todayCount === 1 ? '' : 's'} today.`
+              : 'Nothing recorded today yet — one lesson keeps the streak alive.'}
+          </p>
         </Card>
       </div>
     </>
@@ -130,9 +141,10 @@ export function DashboardPage() {
 }
 
 function targetToLesson(target: string): { unit: UnitData; lesson: LessonData } | null {
-  const [, unitId, lessonId] = target.split('/');
-  const unit = ALL_UNITS.find((u) => u.id === unitId);
-  const lesson = lessonById(lessonId);
+  const parts = parseLessonTarget(target);
+  if (!parts) return null;
+  const unit = ALL_UNITS.find((u) => u.id === parts.unitId);
+  const lesson = lessonById(parts.lessonId);
   if (!unit || !lesson) return null;
   return { unit, lesson };
 }

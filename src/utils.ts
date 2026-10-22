@@ -55,22 +55,51 @@ export function uid(): string {
   return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 9);
 }
 
-/** Normalise learner-typed answers: casefold, trim, collapse whitespace, drop trailing punctuation. */
+/**
+ * Normalise learner-typed answers: casefold, trim, collapse whitespace, drop
+ * punctuation — but KEEP apostrophes, because "don't" and "don t" are different
+ * answers and a learner who typed the apostrophe should be marked right.
+ */
 export function normaliseText(s: string): string {
   return s
     .toLowerCase()
-    .replace(/[\u2019]/g, "'")
-    .replace(/[.,;:!?…"'()[\]]/g, ' ')
+    .replace(/[\u2019\u2018]/g, "'")
+    .replace(/[.,;:!?…“”()[\]]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
 
+/** Stable 32-bit string hash (FNV-1a) — used to seed deterministic shuffles. */
+export function hashString(s: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
+}
+
+/**
+ * Deterministic Fisher–Yates shuffle.
+ *
+ * The previous implementation used an LCG whose low bits have very short
+ * periods, which made `s % (i + 1)` produce visibly patterned orders (the same
+ * few permutations kept repeating). mulberry32 is a 32-bit PRNG with a full
+ * 2^32 period and good bit mixing; the result is still a pure function of the
+ * seed, so every shuffle in the app stays reproducible.
+ */
 export function shuffle<T>(xs: T[], seed = 7): T[] {
   const out = [...xs];
-  let s = seed;
+  let a = (seed >>> 0) + 0x6d2b79f5;
+  const next = (): number => {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
   for (let i = out.length - 1; i > 0; i--) {
-    s = (s * 1103515245 + 12345) & 0x7fffffff;
-    const j = s % (i + 1);
+    const j = Math.floor(next() * (i + 1));
     [out[i], out[j]] = [out[j], out[i]];
   }
   return out;

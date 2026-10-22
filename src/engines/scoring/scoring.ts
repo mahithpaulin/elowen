@@ -12,6 +12,10 @@ export function levelFromXp(xp: number): number {
   return Math.floor(Math.sqrt(Math.max(0, xp) / 60)) + 1;
 }
 
+/**
+ * XP window of a level. `max` is EXCLUSIVE: level 2 covers 60 ≤ xp < 240,
+ * which is exactly what `levelFromXp` returns for that range.
+ */
 export function xpRangeForLevel(level: number): { min: number; max: number } {
   return { min: 60 * (level - 1) ** 2, max: 60 * level ** 2 };
 }
@@ -44,11 +48,22 @@ export function streakFromEvents(events: Pick<ActivityEvent, 'ts'>[], now = Date
 
 export interface TopicAccuracy {
   topic: string;
+  /** Attempts inside the averaging window (the most recent 10). */
   attempts: number;
+  /** Every scored attempt ever recorded for this topic. */
+  total: number;
   avg: number;
 }
 
-/** Average score per topic over recorded scored events (most recent first weighting: simple mean of last 10). */
+/**
+ * Average score per topic over recorded scored events.
+ *
+ * The average uses the most recent 10 attempts for that topic (events are
+ * stored oldest-first), so a topic the learner has just improved is not
+ * dragged down by old scores. `attempts` counts the window, `total` counts
+ * everything — they used to be the same number, which made "2 attempts" in the
+ * recommendation rule mean something different from "2 attempts in the window".
+ */
 export function topicAccuracy(events: ActivityEvent[]): TopicAccuracy[] {
   const byTopic = new Map<string, number[]>();
   for (const e of events) {
@@ -59,11 +74,15 @@ export function topicAccuracy(events: ActivityEvent[]): TopicAccuracy[] {
     byTopic.set(key, arr);
   }
   return [...byTopic.entries()]
-    .map(([topic, scores]) => ({
-      topic,
-      attempts: scores.length,
-      avg: scores.slice(-10).reduce((a, b) => a + b, 0) / Math.min(10, scores.length),
-    }))
+    .map(([topic, scores]) => {
+      const window = scores.slice(-10);
+      return {
+        topic,
+        attempts: window.length,
+        total: scores.length,
+        avg: window.reduce((a, b) => a + b, 0) / window.length,
+      };
+    })
     .sort((a, b) => a.avg - b.avg);
 }
 

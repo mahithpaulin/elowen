@@ -3,7 +3,7 @@
  *
  * Engine choice (evaluated 2026-10-21):
  *  - tesseract.js v5: Apache-2.0, WASM in the browser, English traineddata
- *    (eng.traineddata.gz ≈ 23 MB) fetches from a free CDN (jsDelivr) on first
+ *    (eng.traineddata.gz ≈ 11 MB) fetches from a free CDN (jsDelivr) on first
  *    use and runs locally afterwards in that session. No API key, no cost.
  *  - Alternatives considered: cv-OCR bridging to native tools (needs server),
  *    Kraken (Python-only), TrOCR/HTR models (generative-range, heavy).
@@ -16,7 +16,27 @@
 
 import type { OcrWord } from '../../types';
 
-export const OCR_URL = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
+const TESSERACT_VERSION = '5.1.1';
+const TESSERACT_CORE_VERSION = '5.1.1';
+
+export const OCR_URL = `https://cdn.jsdelivr.net/npm/tesseract.js@${TESSERACT_VERSION}/dist/tesseract.min.js`;
+export const OCR_WORKER_URL = `https://cdn.jsdelivr.net/npm/tesseract.js@${TESSERACT_VERSION}/dist/worker.min.js`;
+export const OCR_CORE_URL = `https://cdn.jsdelivr.net/npm/tesseract.js-core@${TESSERACT_CORE_VERSION}`;
+export const OCR_LANG_PATH = 'https://tessdata.projectnaptha.com/4.0.0';
+export const OCR_LANG_URL = `${OCR_LANG_PATH}/eng.traineddata.gz`;
+/** The SIMD + LSTM core pair a modern browser actually loads. */
+export const OCR_CORE_FILES = [
+  `${OCR_CORE_URL}/tesseract-core-simd-lstm.wasm.js`,
+  `${OCR_CORE_URL}/tesseract-core-simd-lstm.wasm`,
+];
+
+/** Every file the engine needs on disk to work with no network at all. */
+export const OCR_ASSETS: string[] = [
+  OCR_URL,
+  OCR_WORKER_URL,
+  ...OCR_CORE_FILES,
+  OCR_LANG_URL,
+];
 
 const TESSERACT_CDN = OCR_URL;
 
@@ -90,13 +110,18 @@ export class TesseractAdapter implements HandwritingRecognizer {
   async init(_html?: HTMLElement): Promise<void> {
     if (this._status.state === 'ready') return;
     if (this.inflight) return this.inflight;
-    this._status = { state: 'loading', message: 'Downloading the OCR engine (~40 MB, one-time per session)…' };
+    this._status = { state: 'loading', message: 'Downloading the OCR engine (~13 MB, one-time download)…' };
     try {
       this.inflight = (async () => {
         await withScript(TESSERACT_CDN);
         if (!window.Tesseract) throw new Error('OCR engine loaded but did not initialise.');
         this.worker = await window.Tesseract.createWorker('eng', 1, {
-          // Tesseract.js 5 auto-picks worker/core/lang paths on the same CDN.
+          // Explicit paths: the defaults are the same, but naming them means
+          // the offline installer knows exactly which files to cache, so the
+          // "offline-ready" badge in Settings means what it says.
+          workerPath: OCR_WORKER_URL,
+          corePath: OCR_CORE_URL,
+          langPath: OCR_LANG_PATH,
           logger: () => {
             /* intentionally silent; UI shows a fixed progress note */
           },

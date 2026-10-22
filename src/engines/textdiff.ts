@@ -59,14 +59,29 @@ export function alignTokens(ref: string[], got: string[]): TokenDiff[] {
  * Compare a produced transcript/OCR text against the reference sentence.
  * Deterministic edit-distance alignment on lowercase tokens.
  * Punctuation differences are ignored; word differences are the signal.
+ *
+ * Scoring: `matched / max(reference words, produced words)`.
+ * Dividing by the LARGER count is deliberate — the old version divided only by
+ * the reference length, so a learner who read the whole target and then kept
+ * talking for another twenty words still scored 100%. Missing words and extra
+ * words now cost the same amount, and only an exact word-for-word match
+ * scores 1.
  */
 export function compareReference(reference: string, produced: string): CompareResult {
   const ref = tokenise(reference);
   const got = tokenise(produced);
-  if (ref.length === 0) return { tokens: [], similarity: 0 };
+  if (ref.length === 0) {
+    return { tokens: [], similarity: 0, matched: 0, missing: 0, extra: got.length };
+  }
   const tokens = alignTokens(ref, got);
-  const matches = tokens.filter((t) => t.kind === 'match').length;
-  return { tokens, similarity: matches / ref.length };
+  const matched = tokens.filter((t) => t.kind === 'match').length;
+  // A substitution replaces one reference word with one produced word: it
+  // counts as a missing target word AND as an extra spoken word, so
+  // matched + missing === reference words and matched + extra === produced words.
+  const missing = tokens.filter((t) => t.kind === 'del' || t.kind === 'sub').length;
+  const extra = tokens.filter((t) => t.kind === 'ins' || t.kind === 'sub').length;
+  const denominator = Math.max(ref.length, got.length, 1);
+  return { tokens, similarity: matched / denominator, matched, missing, extra };
 }
 
 export function stripSurroundingPunct(word: string): string {

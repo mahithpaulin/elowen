@@ -3,6 +3,7 @@ import { WORDS, VERIFIED_WORD_COUNT } from '../data/vocabulary/words';
 import { getSnapshot, upsertSrs, recordEvent, dueSrsCards } from '../storage/appstore';
 import { srsUpdate, QUALITY_LABELS } from '../engines/srs';
 import { Button, Card, Badge, Eyebrow, Progress, EmptyState, Callout } from '../components/ui';
+import { navigate } from '../app/router';
 import { shuffle } from '../utils';
 import type { SrsCard } from '../types';
 
@@ -37,7 +38,7 @@ export function VocabularyPage() {
       </div>
 
       {mode === 'browse' ? <Browse /> : null}
-      {mode === 'flashcards' ? <Flashcards due={due} /> : null}
+      {mode === 'flashcards' ? <Flashcards due={due} onBrowse={() => setMode('browse')} /> : null}
       {mode === 'quiz' ? <Quiz /> : null}
     </>
   );
@@ -135,42 +136,94 @@ function AddToSrs({ wordId, label }: { wordId: string; label: string }) {
 
 /* --------------------------- flashcards --------------------------- */
 
-function Flashcards({ due }: { due: SrsCard[] }) {
+/**
+ * A review session.
+ *
+ * The queue is captured once, when the tab is opened. The previous version
+ * re-read the "due" list on every render, so the card you just rated left the
+ * list (it is no longer due) and the index silently skipped the next card —
+ * two cards in, the deck showed the wrong word or ran out early.
+ */
+function Flashcards({ due, onBrowse }: { due: SrsCard[]; onBrowse: () => void }) {
   const snap = getSnapshot();
+  const [queue] = useState<string[]>(() => {
+    const start = due.length ? due : snap.srs;
+    return start.map((c) => c.wordId);
+  });
   const [idx, setIdx] = useState(0);
   const [flipped, setFlipped] = useState(false);
-  const queue = due.length ? due : snap.srs;
-  const card = queue[idx];
+  const [reviewed, setReviewed] = useState(0);
+  const [done, setDone] = useState(false);
 
-  if (!card) {
+  const card = idx < queue.length ? snap.srs.find((c) => c.wordId === queue[idx]) : undefined;
+  const word = card ? WORDS.find((w) => w.id === card.wordId) : undefined;
+
+  if (!queue.length) {
     return (
       <EmptyState
         title="No cards yet"
         note="Add words to your review queue from the Browse tab — they come back at growing intervals."
-        action={<Button accent onClick={() => window.location.reload()}>Reload</Button>}
+        action={<Button accent onClick={onBrowse}>Browse words</Button>}
       />
     );
   }
-  const word = WORDS.find((w) => w.id === card.wordId);
-  if (!word) return <EmptyState title="Card data issue" note="The word for this card is missing." />;
+  if (done || !card || !word) {
+    return (
+      <Card style={{ maxWidth: 460, margin: '10px auto', textAlign: 'center' }}>
+        <h2>Session complete</h2>
+        <p className="muted">
+          {reviewed} card{reviewed === 1 ? '' : 's'} reviewed. The next one comes back when it
+          is due — sooner for the ones you found hard.
+        </p>
+        <div className="row" style={{ justifyContent: 'center' }}>
+          <Button onClick={onBrowse}>Add more words</Button>
+          <Button primary onClick={() => navigate('/progress')}>
+            See progress →
+          </Button>
+        </div>
+      </Card>
+    );
+  }
 
   const rate = async (quality: number) => {
     await upsertSrs({ ...card, ...srsUpdate(card, quality) });
-    await recordEvent({ kind: 'vocab', topic: 'vocab', refId: word.id, score: quality >= 3 ? 80 + quality : 40, xp: 6 });
+    await recordEvent({
+      kind: 'vocab',
+      topic: 'vocab',
+      refId: word.id,
+      // A self-rating is not an accuracy score; it is scaled to 0..100 so the
+      // topic average stays comparable, and it is never shown as "accuracy".
+      score: quality * 20,
+      xp: 6,
+    });
+    setReviewed((r) => r + 1);
     setFlipped(false);
-    setIdx((i) => (i + 1) % queue.length);
+    if (idx + 1 >= queue.length) setDone(true);
+    else setIdx((i) => i + 1);
   };
 
   return (
     <>
       <div className={`flash ${flipped ? 'flipped' : ''}`} style={{ maxWidth: 460, margin: '10px auto' }}>
         <div className="inner" style={{ height: 250 }}>
-          <div className="face front" onClick={() => setFlipped(true)} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && setFlipped(true)}>
+          <div
+            className="face front"
+            onClick={() => setFlipped(true)}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => e.key === 'Enter' && setFlipped(true)}
+          >
             <span className="pos">{word.pos}</span>
             <span className="word">{word.word}</span>
             <span className="fliphint">tap to reveal the meaning</span>
           </div>
-          <div className="face back" onClick={() => setFlipped(false)} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && setFlipped(false)}>
+          <div
+            className="face back"
+            onClick={() => setFlipped(false)}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => e.key === 'Enter' && setFlipped(false)}
+          >
             <span className="pos">meaning</span>
             <span className="word" style={{ fontSize: '1.2rem' }}>{word.definition}</span>
             <span className="ex">“{word.example}”</span>
@@ -181,7 +234,7 @@ function Flashcards({ due }: { due: SrsCard[] }) {
       {flipped ? (
         <div className="row" style={{ justifyContent: 'center', gap: 8 }}>
           {[1, 3, 4, 5].map((q) => (
-            <Button key={q} small primary={q === 4} onClick={() => void rate(q)} title={`${QUALITY_LABELS[q]}`}>
+            <Button key={q} small primary={q === 4} onClick={() => void rate(q)} title={QUALITY_LABELS[q]}>
               {QUALITY_LABELS[q]}
             </Button>
           ))}
@@ -190,7 +243,7 @@ function Flashcards({ due }: { due: SrsCard[] }) {
         <p className="center-note">Review honestly — “Lost it” comes back tomorrow, “Easy” in a few weeks.</p>
       )}
       <p className="center-note tiny">
-        {idx + 1} of {queue.length} in queue{due.length ? ` (${due.length} due today)` : ''}
+        {idx + 1} of {queue.length} in this session{due.length ? ` (${due.length} were due today)` : ''}
       </p>
     </>
   );
@@ -228,17 +281,21 @@ function Quiz() {
           </div>
         </div>
         <Callout>Definitions come from the authored word list — same data drives everything.</Callout>
-        <Button
-          primary
-          onClick={() => {
-            setRound((r) => r + 1);
-            setQi(0);
-            setPicked(null);
-            setScore(0);
-          }}
-        >
-          Another round
-        </Button>
+        <div className="row" style={{ justifyContent: 'center' }}>
+          <Button
+            onClick={() => {
+              setRound((r) => r + 1);
+              setQi(0);
+              setPicked(null);
+              setScore(0);
+            }}
+          >
+            Another round
+          </Button>
+          <Button primary onClick={() => navigate('/progress')}>
+            See progress →
+          </Button>
+        </div>
       </Card>
     );
   }
@@ -282,9 +339,22 @@ function Quiz() {
         <Button
           primary
           onClick={async () => {
-            if (correct) setScore(score + 1);
+            const correctNow = correct;
+            if (correctNow) setScore(score + 1);
             setQi((i) => i + 1);
             setPicked(null);
+            // A finished round is real practice — record it once, at the end.
+            if (qi + 1 >= questions.length) {
+              const finalScore = correctNow ? score + 1 : score;
+              const total = questions.length;
+              await recordEvent({
+                kind: 'vocab',
+                topic: 'vocab',
+                label: `quiz round: ${finalScore}/${total}`,
+                score: Math.round((finalScore / total) * 100),
+                xp: Math.max(2, Math.round((finalScore / total) * 10)),
+              });
+            }
           }}
         >
           Next question

@@ -238,7 +238,8 @@ function AppInstallCard() {
       </div>
       <p className="tiny" style={{ marginTop: 8 }}>
         Offline support covers the whole app. The two optional engines (letters OCR, speech
-        transcript) additionally download once from Settings below — then they work offline too.
+        transcript) download once from Settings below and are kept in the browser cache;
+        the browser may clear large caches under storage pressure.
       </p>
     </Card>
   );
@@ -279,13 +280,13 @@ function EnginesCard() {
 
   return (
     <Card>
-      <Eyebrow>Optional engines — download once, use offline</Eyebrow>
+      <Eyebrow>Optional engines — download once, reuse</Eyebrow>
       {ENGINES.map((def) => (
         <div key={def.id} style={{ borderBottom: '1px dashed var(--line)', padding: '10px 0' }}>
           <div className="row spread">
             <b style={{ fontSize: '0.94rem' }}>{def.label}</b>
             <Badge tone={statuses[def.id] ? 'ok' : 'outline'}>
-              {statuses[def.id] ? 'offline-ready' : 'not downloaded'}
+              {statuses[def.id] ? 'downloaded' : 'not downloaded'}
             </Badge>
           </div>
           <p className="tiny">{def.detail}</p>
@@ -353,8 +354,11 @@ function DataCard({ session }: { session: ReturnType<typeof getSession> }) {
     const a = document.createElement('a');
     a.href = url;
     a.download = `elowen-data-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(url);
+    a.remove();
+    // Revoking straight away can cancel the download in some browsers.
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
   };
   return (
     <Card>

@@ -1,6 +1,15 @@
 import type { GrammarIssue, GrammarResult, IssueSeverity } from '../../types';
-import { IRREGULAR_PAST_REVERSE } from './dictionary';
+import { IRREGULAR_BASES } from './dictionary';
 import { likelyMisspelled, MISSPELLINGS, WORD_SET } from './spelling';
+import {
+  baseFormOf,
+  ingFormOf,
+  KNOWN_WORDS,
+  NON_VERB_AFTER_BE,
+  THIRD_SINGULAR_MAP,
+} from './verbs';
+
+export { baseFormOf };
 
 export interface Token {
   text: string; // original text, including attached punctuation
@@ -11,18 +20,33 @@ export interface Token {
 }
 
 /* NOTE: brackets are escaped — an unescaped `]` would close the class early. */
-const TRIM_CHARS = ".,;:!?…\"'\u201c\u201d\u2018\u2019()\\[\\]{}\\/-";
+const TRIM_CHARS = ".,;:!?…\"'“”‘’()\\[\\]{}\\/";
 const TRIM_RE = new RegExp(`^[${TRIM_CHARS}]+|[${TRIM_CHARS}]+$`, 'g');
+/* A hyphen inside a word belongs to the word ("well-known"), never a trim. */
+const EDGE_HYPHEN_RE = /^-|-$/g;
 
+/**
+ * Lowercased core of a token. Hyphens are kept so compound words such as
+ * "well-known" stay one word — the previous version trimmed them and turned
+ * "well-known" into "wellknown", which the spelling rule then reported as a
+ * misspelling.
+ */
 export function coreWord(text: string): string {
-  return text.toLowerCase().replace(/[\u2019]/g, "'").replace(TRIM_RE, '');
+  return text
+    .toLowerCase()
+    .replace(/[’]/g, "'")
+    .replace(TRIM_RE, '')
+    .replace(EDGE_HYPHEN_RE, '');
 }
+
+/** A token is a word when it is letters/digits with internal apostrophes or hyphens. */
+const WORD_RE = /^[\p{L}\p{N}]['’]?[\p{L}\p{N}\p{M}]*(-[\p{L}\p{N}\p{M}]+)*$/u;
 
 export function tokenise(text: string): Token[] {
   const tokens: Token[] = [];
   let offset = 0;
   let sentenceStart = true;
-  for (const raw of text.split(/[\s\u2014\u2013]+/)) {
+  for (const raw of text.split(/[\s—–]+/)) {
     if (raw === '') {
       offset += 1;
       continue;
@@ -30,7 +54,7 @@ export function tokenise(text: string): Token[] {
     const idx = text.indexOf(raw, offset);
     offset = idx < 0 ? offset : idx;
     const word = coreWord(raw);
-    const isWord = /^[\p{L}\p{N}']['\u2019]?[\p{L}\p{N}\p{M}]*$/u.test(word);
+    const isWord = WORD_RE.test(word);
     if (word !== '') {
       tokens.push({ text: raw, offset, word, isWord, sentenceStart });
       sentenceStart = false;
@@ -56,28 +80,6 @@ const PLURAL_SUBJECTS = new Set([
   'parents', 'students', 'teachers', 'players', 'brothers', 'sisters', 'books',
   'words', 'managers', 'customers',
 ]);
-const THIRD_SINGULAR_MAP: Record<string, string> = {
-  go: 'goes', come: 'comes', make: 'makes', take: 'takes', give: 'gives',
-  know: 'knows', say: 'says', think: 'thinks', want: 'wants', like: 'likes',
-  need: 'needs', look: 'looks', work: 'works', play: 'plays', help: 'helps',
-  read: 'reads', write: 'writes', speak: 'speaks', learn: 'learns', stay: 'stays',
-  stop: 'stops', sit: 'sits', run: 'runs', eat: 'eats', drink: 'drinks',
-  sleep: 'sleeps', watch: 'watches', wash: 'washes', teach: 'teaches',
-  study: 'studies', carry: 'carries', buy: 'buys', send: 'sends', tell: 'tells',
-  ask: 'asks', answer: 'answers', open: 'opens', start: 'starts', meet: 'meets',
-  listen: 'listens', hope: 'hopes', kiss: 'kisses', catch: 'catches',
-  finish: 'finishes', live: 'lives', love: 'loves', hate: 'hates', show: 'shows',
-  mean: 'means', feel: 'feels', find: 'finds', understand: 'understands',
-  bring: 'brings', try: 'tries', pass: 'passes', use: 'uses', walk: 'walks',
-  talk: 'talks', call: 'calls', sing: 'sings', win: 'wins', lose: 'loses',
-  wait: 'waits', drive: 'drives', grow: 'grows', sell: 'sells', spend: 'spends',
-  cost: 'costs', fly: 'flies', cut: 'cuts', draw: 'draws', pay: 'pays',
-  visit: 'visits', enjoy: 'enjoys', agree: 'agrees', arrive: 'arrives',
-  believe: 'believes', belong: 'belongs', cook: 'cooks', dance: 'dances',
-  decide: 'decides', explain: 'explains', jump: 'jumps', laugh: 'laughs',
-  borrow: 'borrows', build: 'builds', clean: 'cleans', close: 'closes', cry: 'cries',
-  wear: 'wears', wake: 'wakes', smile: 'smiles', sound: 'sounds',
-};
 const OBJECT_PRONOUN_MAP: Record<string, string> = {
   i: 'me', he: 'him', she: 'her', we: 'us', they: 'them',
 };
@@ -91,12 +93,7 @@ const MODALS = new Set([
   'can', 'could', 'will', 'would', 'shall', 'should', 'may', 'might', 'must',
   "can't", "won't", "couldn't", "wouldn't", "shouldn't",
 ]);
-const HOME_PPS = new Set(['to', 'from']);
 const DO_HELPERS = new Set(["didn't", 'doesnt', "doesn't", 'does', 'did', 'do']);
-const E_DROP_VERBS = new Set([
-  'make', 'take', 'give', 'drive', 'ride', 'write', 'come', 'live', 'use',
-  'dance', 'close', 'arrive', 'decide', 'smile', 'wake', 'agree', 'believe',
-]);
 const DAY_NAMES = new Set([
   'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
 ]);
@@ -118,8 +115,13 @@ const REPEATED_FUNCTION_WORDS = new Set([
   'the', 'a', 'an', 'to', 'and', 'of', 'in', 'i', 'was', 'he', 'she', 'they',
   'it', 'we', 'for', 'on', 'at', 'do', 'does', 'is', 'are', 'am', 'be', 'been',
   'you', 'will', 'this', 'these', 'those', 'my', 'me', 'him', 'her', 'our',
-  'us', 'them', 'but', 'or', 'not', 'no', 'very', 'so', 'if', 'as', 'than',
+  'us', 'them', 'but', 'or', 'not', 'no', 'if', 'as', 'than',
   'what', 'when', 'where', 'who', 'why', 'how',
+]);
+/** Doubled words that are perfectly normal English. */
+const LEGITIMATE_DOUBLES = new Set([
+  'very', 'so', 'no', 'well', 'yes', 'oh', 'ah', 'ha', 'bye', 'hmm', 'um',
+  'who', 'hey', 'wow', 'oops', 'ouch', 'boo', 'gee', 'mhm', 'hush', 'shh',
 ]);
 
 /* ------------------------------------------------------------------ */
@@ -138,13 +140,29 @@ function issue(
   return { ruleId, severity, start, end, excerpt: '', message, explanation, suggestion };
 }
 
+/**
+ * True when the token at `i` is part of a compound subject ("my friend and
+ * his brother …"). The subject number is then unknowable from the token
+ * alone, so agreement rules must stay quiet.
+ */
+function compoundSubject(tokens: Token[], i: number): boolean {
+  if (i <= 0) return false;
+  // Step over a determiner so "and his brother" is seen as a compound.
+  let j = i - 1;
+  while (j >= 0 && DETERMINERS.has(tokens[j]!.word)) j--;
+  if (j < 0) return false;
+  const prev = tokens[j]!.word;
+  return prev === 'and' || prev === 'or' || prev === 'nor';
+}
+
 /** S-V copular agreement: he are → is, they is → are, he have → has, … */
 const copulaRule: RuleFn = (tokens) => {
   const out: GrammarIssue[] = [];
   for (let i = 1; i < tokens.length; i++) {
-    const prev = tokens[i - 1],
-      cur = tokens[i];
+    const prev = tokens[i - 1]!,
+      cur = tokens[i]!;
     if (!prev.isWord || !cur.isWord) continue;
+    if (compoundSubject(tokens, i - 1)) continue; // "my friend and I are" is fine
     const w = cur.word;
     const fix = (want: string): GrammarIssue =>
       issue(
@@ -181,12 +199,12 @@ const copulaRule: RuleFn = (tokens) => {
 const thirdSingularRule: RuleFn = (tokens) => {
   const out: GrammarIssue[] = [];
   for (let i = 1; i < tokens.length; i++) {
-    const prev = tokens[i - 1],
-      cur = tokens[i];
+    const prev = tokens[i - 1]!,
+      cur = tokens[i]!;
     if (!prev.isWord || !cur.isWord) continue;
     if (!SINGULAR_SUBJECT_PRONOUNS.has(prev.word)) continue;
-    if (MODALS.has(prev.word)) continue;
-    const twoBack = i >= 2 ? tokens[i - 2].word : '';
+    if (compoundSubject(tokens, i - 1)) continue;
+    const twoBack = i >= 2 ? tokens[i - 2]!.word : '';
     if (twoBack === 'to' || MODALS.has(twoBack) || DO_HELPERS.has(twoBack)) continue;
     const base = cur.word;
     const sform = THIRD_SINGULAR_MAP[base];
@@ -210,10 +228,10 @@ const thirdSingularRule: RuleFn = (tokens) => {
 const doSupportRule: RuleFn = (tokens) => {
   const out: GrammarIssue[] = [];
   for (let i = 0; i < tokens.length; i++) {
-    const cur = tokens[i];
+    const cur = tokens[i]!;
     if (!cur.isWord) continue;
-    const prev2 = i >= 2 ? tokens[i - 2].word : '';
-    const prev1 = i >= 1 ? tokens[i - 1].word : '';
+    const prev2 = i >= 2 ? tokens[i - 2]!.word : '';
+    const prev1 = i >= 1 ? tokens[i - 1]!.word : '';
     const inDoCtx = (prev1 !== '' && DO_HELPERS.has(prev1)) || (prev1 === 'not' && DO_HELPERS.has(prev2));
     if (!inDoCtx) continue;
     const word = cur.word;
@@ -234,33 +252,26 @@ const doSupportRule: RuleFn = (tokens) => {
   return out;
 };
 
-export function baseFormOf(word: string): string | null {
-  if (IRREGULAR_PAST_REVERSE[word]) return IRREGULAR_PAST_REVERSE[word];
-  if (THIRD_SINGULAR_MAP[word]) {
-    const base = Object.entries(THIRD_SINGULAR_MAP).find(([, v]) => v === word)?.[0];
-    return base ?? null;
-  }
-  if (word.length > 3 && word.endsWith('ed')) {
-    if (word.endsWith('ied')) return word.slice(0, -3) + 'y';
-    if (word.endsWith('pped')) return word.slice(0, -4); // stopped → stop
-    if (word.endsWith('tted')) return word.slice(0, -4); // admitted → admit
-    return word.slice(0, -2);
-  }
-  return null;
-}
-
-/** be-verb + plain verb: “She is go …” → suggest -ing or plain present. */
+/**
+ * be-verb + plain verb: “She is go …” → suggest the present continuous.
+ *
+ * Two guards keep this quiet where it should be:
+ *  - only present-tense be-verbs (am/is/are) are considered;
+ *  - words that are normally adjectives or nouns after "is" (open, close,
+ *    live, work, ready …) are excluded, so "the shop is open" is not flagged.
+ */
 const beInfinitiveRule: RuleFn = (tokens) => {
   const out: GrammarIssue[] = [];
   for (let i = 0; i < tokens.length - 1; i++) {
-    const cur = tokens[i],
-      next = tokens[i + 1];
+    const cur = tokens[i]!,
+      next = tokens[i + 1]!;
     if (!cur.isWord || !next.isWord) continue;
-    if (!['am', 'is', 'are', 'was', 'were'].includes(cur.word)) continue;
+    if (!['am', 'is', 'are'].includes(cur.word)) continue;
+    if (NON_VERB_AFTER_BE.has(next.word)) continue;
     if (!THIRD_SINGULAR_MAP[next.word]) continue;
-    const ingForm = E_DROP_VERBS.has(next.word) ? next.word.slice(0, -1) + 'ing' : next.word + 'ing';
-    const sugg = THIRD_SINGULAR_MAP[next.word];
+    const ingForm = ingFormOf(next.word);
     if (!ingForm) continue;
+    const plain = THIRD_SINGULAR_MAP[next.word]!;
     out.push(
       issue(
         'TEN-004',
@@ -268,7 +279,7 @@ const beInfinitiveRule: RuleFn = (tokens) => {
         cur.offset,
         next.offset + next.text.length,
         `“${cur.word} ${next.word}” combines a be-verb with a plain present verb.`,
-        `Use the present continuous (“${cur.word} ${ingForm}”) for ongoing action, the plain present (“${sugg}”) for habits, or “will ${next.word}” for the future.`,
+        `Use the present continuous (“${cur.word} ${ingForm}”) for ongoing action, the plain present (“${plain}”) for habits, or “will ${next.word}” for the future.`,
         `${cur.word} ${ingForm}`,
       ),
     );
@@ -280,15 +291,15 @@ const beInfinitiveRule: RuleFn = (tokens) => {
 const pronounCaseRule: RuleFn = (tokens) => {
   const out: GrammarIssue[] = [];
   for (let i = 0; i < tokens.length; i++) {
-    const cur = tokens[i];
-    const prevW = i > 0 ? tokens[i - 1].word : '';
-    const prev2W = i > 1 ? tokens[i - 2].word : '';
+    const cur = tokens[i]!;
+    const prevW = i > 0 ? tokens[i - 1]!.word : '';
+    const prev2W = i > 1 ? tokens[i - 2]!.word : '';
     // look left past connectors and a single closed-class skip word:
     // “between you and I”, “for me and you”
     let prepSeen = PREP_BEFORE_OBJ.has(prevW);
     if (!prepSeen && (prevW === 'and' || prevW === 'or')) {
       for (let j = i - 2; j >= i - 4 && j >= 0; j--) {
-        const w = tokens[j].word;
+        const w = tokens[j]!.word;
         if (PREP_BEFORE_OBJ.has(w)) {
           prepSeen = true;
           break;
@@ -299,6 +310,8 @@ const pronounCaseRule: RuleFn = (tokens) => {
     if (!prepSeen) continue;
     const wanted = OBJECT_PRONOUN_MAP[cur.word];
     if (!wanted) continue;
+    // "to her" is already correct — never tell a learner to change "her".
+    if (wanted === cur.word) continue;
     out.push(
       issue(
         'PRN-001',
@@ -318,11 +331,10 @@ const pronounCaseRule: RuleFn = (tokens) => {
 const articleTimeRule: RuleFn = (tokens) => {
   const out: GrammarIssue[] = [];
   for (let i = 0; i < tokens.length; i++) {
-    const cur = tokens[i],
+    const cur = tokens[i]!,
       next = tokens[i + 1];
     if (!cur.isWord || !next) continue;
     if (!['in', 'on', 'at'].includes(cur.word)) continue;
-    const after = tokens[i + 2];
     if (DAY_NAMES.has(next.word) && cur.word !== 'on') {
       out.push(
         issue(
@@ -360,18 +372,23 @@ const articleTimeRule: RuleFn = (tokens) => {
             `in the`,
           ),
         );
-      } else if (after && after.word !== 'the') {
-        out.push(
-          issue(
-            'ART-004',
-            'possible',
-            cur.offset,
-            cur.offset + cur.text.length,
-            `Usually “in the ${next.word}”.`,
-            `The article is standard: “in the morning / afternoon / evening”.`,
-            `in the`,
-          ),
-        );
+      } else {
+        // “in the morning” needs the article between the preposition and the
+        // word: the token after the part of day must be “the”.
+        const after = tokens[i + 2];
+        if (!after || after.word !== 'the') {
+          out.push(
+            issue(
+              'ART-004',
+              'possible',
+              cur.offset,
+              next.offset + next.text.length,
+              `Usually “in the ${next.word}”.`,
+              `The article is standard: “in the morning / afternoon / evening”.`,
+              `in the ${next.word}`,
+            ),
+          );
+        }
       }
     }
   }
@@ -381,10 +398,11 @@ const articleTimeRule: RuleFn = (tokens) => {
 /** Redundant/misused verb+preposition pairs. */
 const verbPrepRule: RuleFn = (tokens) => {
   const out: GrammarIssue[] = [];
-  const span = (i: number, j: number) => ({ start: tokens[i].offset, end: tokens[j].offset + tokens[j].text.length });
+  const span = (i: number, j: number) => ({ start: tokens[i]!.offset, end: tokens[j]!.offset + tokens[j]!.text.length });
   for (let i = 0; i < tokens.length - 1; i++) {
-    const cur = tokens[i].word,
-      next = tokens[i + 1].word;
+    const cur = tokens[i]!.word,
+      next = tokens[i + 1]!.word;
+    if (!tokens[i]!.isWord || !tokens[i + 1]!.isWord) continue;
     if (cur === 'discuss' && next === 'about') {
       const s = span(i, i + 1);
       out.push(issue('PREP-001', 'error', s.start, s.end,
@@ -397,7 +415,7 @@ const verbPrepRule: RuleFn = (tokens) => {
       out.push(issue('PREP-003', 'error', s.start, s.end,
         `“married with” → “married to”.`,
         `Use “married to”: She is married to a doctor. (“Got married to …” likewise.)`,
-        `married`));
+        `married to`));
     }
     if (cur === 'depend' && next === 'of') {
       const s = span(i, i + 1);
@@ -411,7 +429,7 @@ const verbPrepRule: RuleFn = (tokens) => {
       out.push(issue('PREP-005', 'possible', s.start, s.end,
         `“arrive to” is usually “arrive at/in”.`,
         `Distinguish arrive at (a point: station) and arrive in (a city/country).`,
-        `arrive`));
+        `arrive at`));
     }
     if ((cur === 'return' || cur === 'revert') && next === 'back') {
       const s = span(i, i + 1);
@@ -435,18 +453,19 @@ const verbPrepRule: RuleFn = (tokens) => {
       const p = tokens[i + 1];
       if (p && (OBJECT_PRONOUN_MAP[p.word] || ['me', 'him', 'her', 'us', 'them'].includes(p.word))) {
         const s = span(i, i + 1);
-        if (OBJECT_PRONOUN_MAP[p.word]) {
+        const obj = OBJECT_PRONOUN_MAP[p.word];
+        if (obj) {
           // subject form used directly after the verb: explain I → explain to me
           out.push(issue('PREP-008', 'error', s.start, s.end,
-            `“${cur} ${p.word}” → “${cur} to ${OBJECT_PRONOUN_MAP[p.word]}”.`,
+            `“${cur} ${p.word}” → “${cur} to ${obj}”.`,
             `Use “to” before the person: explain/mention/describe to me.`,
-            `${cur} to`));
+            `${cur} to ${obj}`));
         } else {
           // object pronoun without the preposition: explain me → explain to me
           out.push(issue('PREP-009', 'error', s.start, s.end,
             `“${cur} ${p.word}” → “${cur} to ${p.word}”.`,
             `The verb takes “to” before a person: explain to me, describe to us.`,
-            `${cur} to`));
+            `${cur} to ${p.word}`));
         }
       }
     }
@@ -458,9 +477,10 @@ const verbPrepRule: RuleFn = (tokens) => {
 const doubledWordRule: RuleFn = (tokens) => {
   const out: GrammarIssue[] = [];
   for (let i = 1; i < tokens.length; i++) {
-    const a = tokens[i - 1],
-      b = tokens[i];
+    const a = tokens[i - 1]!,
+      b = tokens[i]!;
     if (!a.isWord || !b.isWord || a.word !== b.word) continue;
+    if (LEGITIMATE_DOUBLES.has(b.word)) continue;
     if (['that', 'had'].includes(b.word)) continue;
     const severity: IssueSeverity = REPEATED_FUNCTION_WORDS.has(b.word) ? 'error' : 'possible';
     out.push(
@@ -481,29 +501,34 @@ const doubledWordRule: RuleFn = (tokens) => {
 };
 
 /** Missing space after punctuation in the raw string. */
+const ABBREVIATIONS = [
+  'mr', 'mrs', 'ms', 'dr', 'prof', 'sr', 'jr', 'st', 'vs', 'etc', 'no', 'fig',
+  'inc', 'ltd', 'co', 'dept', 'approx', 'est', 'min', 'max', 'e.g', 'i.e',
+];
+
 const spacingRule = (text: string): GrammarIssue[] => {
   const out: GrammarIssue[] = [];
   const re = /([,;:!?])([A-Za-z])|([a-z])\.([A-Za-z])/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
     const puncIdx = m[1] !== undefined ? m[1] : undefined;
+    // URLs, e-mail addresses and file names are not sentences.
+    const lead = text.slice(Math.max(0, m.index - 40), m.index).toLowerCase();
+    if (/[@/]|https?:|www\./.test(lead)) continue;
     if (puncIdx !== undefined) {
       const start = m.index;
-      const window = text.slice(Math.max(0, start - 4), start).toLowerCase();
-      if (window.includes('@') || window.includes('http')) continue;
       out.push(issue('PUN-001', 'error', start, start + 2,
         'Missing space after punctuation.',
         'Add a space after , ; : ! ? to separate sentences and clauses.',
         `${m[1]} ${m[2]}`));
     } else {
       const start = m.index + 1;
-      const window = text.slice(Math.max(0, start - 4), start).toLowerCase();
-      if (window.includes('@') || window.includes('http')) continue;
-      if (/\b(mr|dr|ms|mrs|no)\.$/i.test(text.slice(Math.max(0, start - 5), start))) continue;
+      const before = text.slice(Math.max(0, start - 6), start).toLowerCase();
+      if (ABBREVIATIONS.some((a) => before.endsWith(a + '.'))) continue;
       out.push(issue('PUN-002', 'error', start, start + 2,
         'Missing space after the full stop.',
         'Put a space after the period before the next sentence starts.',
-        `${m[3] ?? '.'} `));
+        `. ${m[4]}`));
     }
   }
   return out;
@@ -532,14 +557,18 @@ const repeatedPunctRule = (text: string): GrammarIssue[] => {
 const capitalisationRule = (_text: string, tokens: Token[]): GrammarIssue[] => {
   const out: GrammarIssue[] = [];
   for (const t of tokens) {
-    if (t.sentenceStart && /^[\p{Ll}]{2}/u.test(t.text)) {
-      out.push(issue('CAP-001', 'error', t.offset, t.offset + 1,
-        'A sentence usually starts with a capital letter.',
-        'Capitalize the first word of every sentence.',
-        t.text[0].toUpperCase()));
+    // A one-letter word still starts a sentence: "a cat sat." needs a capital.
+    if (t.sentenceStart && /^\p{Ll}/u.test(t.text)) {
+      // "i" is handled by CAP-002 below — one finding per problem, not two.
+      if (t.word !== 'i') {
+        out.push(issue('CAP-001', 'error', t.offset, t.offset + 1,
+          'A sentence usually starts with a capital letter.',
+          'Capitalize the first word of every sentence.',
+          t.text[0]!.toUpperCase()));
+      }
     }
     if (t.word === 'i' || t.word.startsWith("i'")) {
-      if (/^[\p{Ll}]/u.test(t.text)) {
+      if (/^\p{Ll}/u.test(t.text)) {
         out.push(issue('CAP-002', 'error', t.offset, t.offset + t.text.length,
           'The pronoun “I” is always capitalized.',
           'English capitalizes “I” everywhere: You and I are friends.',
@@ -552,12 +581,36 @@ const capitalisationRule = (_text: string, tokens: Token[]): GrammarIssue[] => {
 
 /* ------------------------- spelling ------------------------- */
 
+/**
+ * Regular inflections of a known word are not misspellings ("cans" ← "can").
+ * An -ed form whose base has an irregular past ("teached" ← "teach") is NOT a
+ * regular inflection, so it is still reported.
+ */
+function isRegularInflection(word: string): boolean {
+  if (word.length < 3) return false;
+  if (word.endsWith('s')) {
+    const stem = word.slice(0, -1);
+    return stem.length >= 2 && KNOWN_WORDS.has(stem);
+  }
+  if (word.length >= 5 && word.endsWith('ing')) {
+    const stem = word.slice(0, -3);
+    return stem.length >= 2 && KNOWN_WORDS.has(stem);
+  }
+  if (word.length >= 4 && word.endsWith('ed')) {
+    const stem = word.slice(0, -2);
+    const short = word.slice(0, -3);
+    for (const s of [stem, short]) {
+      if (s.length >= 2 && KNOWN_WORDS.has(s) && !IRREGULAR_BASES.has(s)) return true;
+    }
+    return false;
+  }
+  return false;
+}
+
 const spellingRule: RuleFn = (tokens) => {
   const out: GrammarIssue[] = [];
-  const pushed = new Set<string>();
   for (const t of tokens) {
     if (!t.isWord) continue;
-    const key = `${t.word}@${t.offset}`;
 
     // curated misspelling table: check regardless of capitals
     const curated = MISSPELLINGS[t.word];
@@ -566,21 +619,24 @@ const spellingRule: RuleFn = (tokens) => {
         `“${t.word}” is a common misspelling.`,
         `The correct spelling is “${curated}”.`,
         curated));
-      pushed.add(key);
       continue;
     }
 
     // proper noun / sentence-start guard: any leading capital is skipped
     if (/^\p{Lu}/u.test(t.text)) continue;
     if (/[\p{Lu}]/u.test(t.text.slice(1))) continue;
+    // compound words ("well-known") and contractions ("don't") are not in the
+    // dictionary — checking them only produced false alarms.
+    if (t.word.includes('-')) continue;
+    if (t.word.includes("'")) continue;
     if (t.word.endsWith("'s") && WORD_SET.has(t.word.slice(0, -2))) continue;
+    if (isRegularInflection(t.word)) continue;
     const alt = likelyMisspelled(t.word);
-    if (alt && !pushed.has(key)) {
+    if (alt) {
       out.push(issue('SPL-002', 'possible', t.offset, t.offset + t.text.length,
         `“${t.word}” is not in my dictionary.`,
         `Did you mean “${alt}”? If this is a proper noun, ignore.`,
         alt));
-      pushed.add(key);
     }
   }
   return out;
@@ -599,6 +655,8 @@ const RULES: RuleFn[] = [
   doubledWordRule,
   spellingRule,
 ];
+
+const SEVERITY_ORDER: Record<IssueSeverity, number> = { error: 0, possible: 1, style: 2 };
 
 /** Run all rules; returns issues sorted by position, duplicates removed. */
 export function checkGrammar(text: string): GrammarResult {
@@ -622,7 +680,9 @@ export function checkGrammar(text: string): GrammarResult {
     if (!seen.has(key)) seen.set(key, { ...it, excerpt: trimmed.slice(it.start, it.end) });
   }
   return {
-    issues: [...seen.values()].sort((a, b) => a.start - b.start),
+    issues: [...seen.values()].sort(
+      (a, b) => a.start - b.start || SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity],
+    ),
     tokenCount: tokens.length,
   };
 }

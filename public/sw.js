@@ -4,12 +4,13 @@
  *   at install time, so the whole app works on the first unlock-airplane.
  * - Network-first for document navigations with a cache fallback.
  * - Cache-first for same-origin assets (hashed filenames = immutable).
- * - Cache-first for cross-origin GETs into elowen-cdn: that is how the OCR
- *   script, the speech WASM bundle, and the ~40 MB voice model keep working
- *   after "Install" without any network.
+ * - Cache-first for cross-origin GETs into elowen-cdn: this is how engine
+ *   scripts and downloaded assets are reused without refetching. Requests made
+ *   inside third-party blob workers can bypass this cache; the browser's HTTP
+ *   cache still applies to them.
  * - Never respond with invented content: a miss is an error, not a fake page.
  */
-const VERSION = 'elowen-v2';
+const VERSION = 'elowen-v1.0.0';
 const CORE = ['./', './index.html'];
 const CDN_CACHE = 'elowen-cdn';
 

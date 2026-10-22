@@ -32,19 +32,28 @@ export function vad(samples: Float32Array, sampleRate: number): SegMask {
     let sum = 0;
     const start = f * hop;
     const end = Math.min(samples.length, start + win);
-    for (let i = start; i < end; i++) sum += samples[i] * samples[i];
+    for (let i = start; i < end; i++) sum += samples[i]! * samples[i]!;
     energy[f] = Math.sqrt(sum / Math.max(1, end - start));
   }
-  const dB = Array.from(energy, dbfs);
-  const noiseFloor = percentile(dB, 0.15);
-  const enterThreshold = Math.max(-46, noiseFloor + 10);
-  const exitThreshold = enterThreshold - 4;
+  const dB = Array.from(energy, (v) => dbfs(v));
+  let peakDb = -96;
+  for (const v of dB) if (v > peakDb) peakDb = v;
   const mask = new Uint8Array(frames);
+  // No usable signal at all — stay silent rather than inventing speech.
+  if (peakDb < -55) return { frames: mask, hop };
+
+  // Noise floor from the quietest part of the clip, then a threshold that is
+  // both above the floor and safely below the loudest frame. The old fixed
+  // "+10 dB over the floor" rule failed on a recording that is speech all the
+  // way through: the floor was then the speech itself and nothing was detected.
+  const noiseFloor = percentile(dB, 0.1);
+  const enterThreshold = clamp(noiseFloor + 8, -55, Math.max(-55, peakDb - 14));
+  const exitThreshold = enterThreshold - 4;
   let run = 0;
   let inSpeech = 0;
   let below = 0;
   for (let f = 0; f < frames; f++) {
-    const d = dB[f];
+    const d = dB[f]!;
     if (d >= enterThreshold) {
       run++;
       if (run >= 3) inSpeech = 1;
@@ -74,30 +83,36 @@ export function describeActivity(mask: SegMask, samples: Float32Array, sampleRat
   for (let i = 0; i < mask.frames.length; i++) speech += mask.frames[i];
   const speechS = speech * hopS;
   const totalS = samples.length / sampleRate;
-  // pause count: gaps ≥250 ms between speech
+  // Pause count: gaps ≥250 ms *between* two speech segments. The silence
+  // before the first word is not a pause — the old code counted it, so every
+  // recording that started with a breath reported one extra pause.
   let pauseCount = 0;
   let gap = 0;
-  let ended = 0;
+  let seenSpeech = false;
   for (let i = 0; i < mask.frames.length; i++) {
     if (mask.frames[i]) {
-      if (gap * hopS >= 0.25) pauseCount++;
+      if (seenSpeech && gap * hopS >= 0.25) pauseCount++;
       gap = 0;
-      ended = i;
+      seenSpeech = true;
     } else {
       gap++;
     }
   }
-  void ended;
-  // envelope for the UI waveform
+  // envelope for the UI waveform, normalised to the loudest moment so a quiet
+  // recording is still readable
   const wave: number[] = new Array(waveBuckets).fill(0);
   const per = Math.max(1, Math.floor(samples.length / waveBuckets));
+  let maxPeak = 0;
   for (let b = 0; b < waveBuckets; b++) {
     const start = b * per;
     const end = Math.min(samples.length, start + per);
     let peak = 0;
-    for (let i = start; i < end; i++) peak = Math.max(peak, Math.abs(samples[i]));
-    wave[b] = clamp(peak / 0.35, 0, 1);
+    for (let i = start; i < end; i++) peak = Math.max(peak, Math.abs(samples[i]!));
+    wave[b] = peak;
+    if (peak > maxPeak) maxPeak = peak;
   }
+  const scale = maxPeak > 0.02 ? maxPeak : 1;
+  for (let b = 0; b < waveBuckets; b++) wave[b] = clamp(wave[b]! / scale, 0, 1);
   return { speechS, silenceS: Math.max(0, totalS - speechS), pauseCount, wave };
 }
 
@@ -131,6 +146,12 @@ export function analyseAudio(samples: Float32Array, sampleRate: number, transcri
   if (transcriptWordCount != null && act.speechS > 0.3 && transcriptWordCount > 0) {
     speechRate = transcriptWordCount / act.speechS;
   }
+  if (speechRate != null && speechRate > 6.5) {
+    warnings.push('The estimated speaking rate is very high — check the transcript.');
+  }
+  if (act.speechS > 0.3 && act.pauseCount >= 8) {
+    warnings.push('Lots of long pauses — try the sentence in one breath.');
+  }
 
   const report: AudioReport = {
     durationS: Math.round(durationS * 100) / 100,
@@ -144,9 +165,6 @@ export function analyseAudio(samples: Float32Array, sampleRate: number, transcri
     warnings,
     wave: act.wave,
   };
-  if (report.speechRate != null && report.speechRate > 6.5) {
-    warnings.push('The estimated speaking rate is very high — check the transcript.');
-  }
   return report;
 }
 
@@ -156,6 +174,56 @@ export function summariseDuration(s: number): string {
   const m = Math.floor(s / 60);
   return `${m}m ${Math.round(s - m * 60)}s`;
 }
+
+/* ------------------------------ resampling ------------------------------ */
+
+const sincPi = (x: number): number => (x === 0 ? 1 : Math.sin(Math.PI * x) / (Math.PI * x));
+
+/**
+ * Band-limited resampling with a windowed-sinc kernel.
+ *
+ * The offline recogniser works on 16 kHz mono audio, while the browser
+ * records at whatever rate the device uses (48 kHz is common). Feeding 48 kHz
+ * audio to a 16 kHz model recognises badly, so the take is resampled first.
+ * A plain sample-drop would alias high frequencies down into the speech band
+ * and produce nonsense words, so the kernel is low-passed to the lower of the
+ * two Nyquist limits.
+ */
+export function resample(
+  samples: Float32Array,
+  fromRate: number,
+  toRate: number,
+  taps = 32,
+): Float32Array {
+  if (fromRate === toRate || samples.length === 0 || fromRate <= 0 || toRate <= 0) {
+    return samples;
+  }
+  const ratio = toRate / fromRate;
+  const outLen = Math.max(1, Math.round(samples.length * ratio));
+  const out = new Float32Array(outLen);
+  const cutoff = 0.5 * Math.min(1, ratio); // cycles per input sample
+  const half = Math.max(2, Math.floor(taps / 2));
+  for (let i = 0; i < outLen; i++) {
+    const center = i / ratio; // position in the input
+    const i0 = Math.floor(center);
+    let sum = 0;
+    let norm = 0;
+    for (let k = -half + 1; k <= half; k++) {
+      const idx = i0 + k;
+      if (idx < 0 || idx >= samples.length) continue;
+      const x = center - idx; // distance in input samples
+      const window = 0.5 + 0.5 * Math.cos((Math.PI * x) / half); // Hann
+      const coef = cutoff * sincPi(cutoff * x) * window;
+      sum += samples[idx]! * coef;
+      norm += coef;
+    }
+    out[i] = norm !== 0 ? sum / norm : 0;
+  }
+  return out;
+}
+
+/** The sample rate the bundled offline recogniser expects. */
+export const ASR_SAMPLE_RATE = 16000;
 
 export const EMPTY_REPORT: AudioReport = {
   durationS: 0,

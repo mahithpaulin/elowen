@@ -81,6 +81,10 @@ export function percentileOf(g: Gray8, p: number): number {
 /**
  * Robust contrast stretch saturating 2% dark / 98% bright percentiles.
  * Returns a new buffer; leaves the input untouched.
+ *
+ * The result is clamped to 0..255 on purpose: values below the low percentile
+ * are negative, and writing a negative number into a Uint8Array wraps it round
+ * to 255 — which turned the darkest ink of a page white before thresholding.
  */
 export function contrastStretch(g: Gray8, lowP = 0.02, highP = 0.98): Gray8 {
   const lo = percentileOf(g, lowP);
@@ -88,7 +92,7 @@ export function contrastStretch(g: Gray8, lowP = 0.02, highP = 0.98): Gray8 {
   const scale = hi - lo <= 1 ? 1 : 255 / (hi - lo);
   const data = new Uint8Array(g.data.length);
   for (let i = 0; i < g.data.length; i++) {
-    data[i] = ((g.data[i] - lo) * scale) | 0;
+    data[i] = clamp255((g.data[i] - lo) * scale);
   }
   return { w: g.w, h: g.h, data };
 }

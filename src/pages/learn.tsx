@@ -67,7 +67,6 @@ export function LearnPage() {
 
 /** Lesson player route: /learn/:unitId/:lessonId */
 export function LessonPage({ unitId, lessonId }: { unitId: string; lessonId: string }) {
-  const snap = getSnapshot();
   const unit = ALL_UNITS.find((u) => u.id === unitId);
   const lesson = unit?.lessons.find((l) => l.id === lessonId);
 
@@ -77,13 +76,13 @@ export function LessonPage({ unitId, lessonId }: { unitId: string; lessonId: str
   if (!unit || !lesson) {
     return <EmptyState title="Lesson not found" note="Pick a lesson from Learn." />;
   }
-  const key = attempt;
-  void snap;
 
   const finish = async ({ percent, total }: { correctCount: number; total: number; percent: number }) => {
     await recordLessonAttempt(lesson.id, percent, Math.round((percent / 100) * 12), lesson.topic);
     setDone({ percent, total });
   };
+
+  const nextLesson = nextLessonAfter(unit.id, lesson.id);
 
   return (
     <>
@@ -103,6 +102,8 @@ export function LessonPage({ unitId, lessonId }: { unitId: string; lessonId: str
             setDone(null);
             setAttempt((a) => a + 1);
           }}
+          onNext={nextLesson ? () => navigate(nextLesson) : undefined}
+          nextLabel={nextLesson ? 'Next lesson →' : undefined}
         />
       ) : (
         <>
@@ -118,9 +119,18 @@ export function LessonPage({ unitId, lessonId }: { unitId: string; lessonId: str
               ))}
             </ul>
           </Card>
-          <ExerciseDeck key={key} lesson={lesson} onFinish={finish} />
+          <ExerciseDeck key={attempt} lesson={lesson} onFinish={finish} attempt={attempt} />
         </>
       )}
     </>
   );
+}
+
+/** The lesson that follows in the flat curriculum order, if any. */
+function nextLessonAfter(unitId: string, lessonId: string): string | null {
+  const flat = ALL_UNITS.flatMap((u) => u.lessons.map((l) => ({ unit: u, lesson: l })));
+  const i = flat.findIndex((x) => x.unit.id === unitId && x.lesson.id === lessonId);
+  if (i < 0 || i + 1 >= flat.length) return null;
+  const n = flat[i + 1]!;
+  return `learn/${n.unit.id}/${n.lesson.id}`;
 }

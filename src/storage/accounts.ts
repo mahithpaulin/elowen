@@ -47,11 +47,13 @@ export function getSession(): AccountSession | null {
 export function setSession(profile: GoogleProfile, migrateGuest: boolean): Promise<void> {
   const existing = getSession();
   return (async () => {
+    let migrated = false;
     if (migrateGuest && !existing) {
       // copy the guest database into the new account namespace (one-time)
-      await copyGuestData(profile.sub);
+      const result = await copyGuestData(profile.sub);
+      migrated = result.copied > 0;
     }
-    localStorage.setItem(sessionKey(), JSON.stringify({ ...profile, migratedGuest: migrateGuest }));
+    localStorage.setItem(sessionKey(), JSON.stringify({ ...profile, migratedGuest: migrated }));
   })();
 }
 

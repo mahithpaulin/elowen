@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { getSnapshot, ALL_UNITS, demoEvents } from '../storage/appstore';
+import { getSnapshot, ALL_UNITS, realEvents, isDemoEvent } from '../storage/appstore';
 import { topicAccuracy } from '../engines/scoring/scoring';
 import { BarChart, LineChart, Card, Eyebrow, EmptyState, Callout, Badge, Button } from '../components/ui';
 import { navigate } from '../app/router';
@@ -10,7 +10,8 @@ import { wordDate } from './helpers';
 export function ProgressPage() {
   const snap = getSnapshot();
   const events = snap.events;
-  const topic = useMemo(() => topicAccuracy(events.filter((e) => e.kind !== 'demo')), [events.length]);
+  const real = useMemo(() => realEvents(snap), [snap]);
+  const topic = useMemo(() => topicAccuracy(real), [real]);
 
   const hwTrend = [...snap.handwriting]
     .sort((a, b) => a.ts - b.ts)
@@ -21,12 +22,17 @@ export function ProgressPage() {
     .filter((v): v is { x: string; y: number } => v != null);
 
   const dueCards = snap.srs.filter((c) => c.due <= Date.now()).length;
-  const lessonsOpen = ALL_UNITS.flatMap((u) => u.lessons.map((l) => ({
-    id: l.id,
-    title: `${u.title} — ${l.title}`,
-    best: snap.lessons.find((r) => r.lessonId === `${u.id}/${l.id}`)?.best ?? null,
-  })))
-    .filter((l) => l.best == null || l.best < 80);
+  // Lesson progress is keyed on the bare lesson id — the old lookup used
+  // "unit/lesson", which never matched, so every lesson read "not started".
+  const lessonsOpen = ALL_UNITS.flatMap((u) =>
+    u.lessons.map((l) => ({
+      id: l.id,
+      title: `${u.title} — ${l.title}`,
+      best: snap.lessons.find((r) => r.lessonId === l.id)?.best ?? null,
+    })),
+  ).filter((l) => l.best == null || l.best < 80);
+
+  const hasDemo = events.some((e) => isDemoEvent(e));
 
   return (
     <>
@@ -36,10 +42,10 @@ export function ProgressPage() {
         uploaded; downloads include events, scores and settings only.
       </p>
 
-      {events.some((e) => e.kind === 'demo') ? (
+      {hasDemo ? (
         <Callout>
-          Sample data is present (seeded from the dashboard banner). Demo events are clearly
-          marked and excluded from the averages below.
+          Sample data is present (seeded from the dashboard banner). It is flagged on every
+          event and excluded from the averages below.
         </Callout>
       ) : null}
 
@@ -96,10 +102,12 @@ export function ProgressPage() {
                     <span className="tiny">
                       <b>{e.kind}</b>
                       {e.topic ? ` · ${e.topic}` : ''}
-                      {e.kind === 'demo' ? ' · sample' : ''}
+                      {e.demo ? ' · sample' : ''}
+                      {e.label ? ` · ${e.label}` : ''}
                     </span>
                     <span className="tiny">
-                      {e.score != null ? `${Math.round(e.score)}% · ` : ''}+{e.xp} xp · {wordDate(e.ts)}
+                      {e.score != null ? `${Math.round(e.score)}% · ` : 'no score · '}
+                      +{e.xp} xp · {wordDate(e.ts)}
                     </span>
                   </li>
                 ))
@@ -147,5 +155,3 @@ export function ProgressPage() {
     </>
   );
 }
-
-void demoEvents;

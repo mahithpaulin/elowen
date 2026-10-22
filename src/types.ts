@@ -77,7 +77,14 @@ export interface TokenDiff {
 
 export interface CompareResult {
   tokens: TokenDiff[];
-  similarity: number; // 0..1 fraction of reference tokens matched
+  /** 0..1 — matched words divided by the larger of the two word counts. */
+  similarity: number;
+  /** Words present in both. */
+  matched: number;
+  /** Words in the reference that were never produced. */
+  missing: number;
+  /** Words produced that are not in the reference. */
+  extra: number;
 }
 
 /* Handwriting analysis types */
@@ -154,8 +161,7 @@ export type EventKind =
   | 'vocab'
   | 'reading'
   | 'handwriting'
-  | 'speaking'
-  | 'demo';
+  | 'speaking';
 
 export interface ActivityEvent {
   id: string;
@@ -164,8 +170,10 @@ export interface ActivityEvent {
   topic?: string;
   refId?: string;
   label?: string;
-  score?: number; // 0..100
+  score?: number; // 0..100 — absent when the case could not be measured
   xp: number;
+  /** True for the labelled sample data the tour can load. Never mixed with real work. */
+  demo?: boolean;
 }
 
 export interface LessonProgress {

@@ -44,9 +44,24 @@ describe('compareReference', () => {
     const result = compareReference('one two three four', 'one two');
     expect(result.similarity).toBeCloseTo(2 / 4);
   });
-  it('treats produced-only words as inserts without hurting match count of the sentence skeleton', () => {
+  it('penalises extra words as well as missing ones', () => {
+    // Reading the whole target and then rambling on must not score 100%.
     const result = compareReference('the city', 'the the city');
-    expect(result.similarity).toBe(1);
+    expect(result.similarity).toBeCloseTo(2 / 3);
+    expect(result.matched).toBe(2);
+    expect(result.extra).toBe(1);
+    expect(result.missing).toBe(0);
+  });
+  it('reports missing and extra counts', () => {
+    const result = compareReference('one two three', 'one four');
+    expect(result.matched).toBe(1);
+    expect(result.missing).toBe(2);
+    expect(result.extra).toBe(1);
+    expect(result.similarity).toBeCloseTo(1 / 3);
+  });
+  it('is 1 only for a word-for-word match', () => {
+    expect(compareReference('the market opens', 'the market opens').similarity).toBe(1);
+    expect(compareReference('the market opens', 'the market opens now').similarity).toBeLessThan(1);
   });
   it('empty produced scores 0', () => {
     expect(compareReference('some words', '').similarity).toBe(0);

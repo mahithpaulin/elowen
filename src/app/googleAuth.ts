@@ -92,8 +92,13 @@ export function decodeJwtPayload(jwt: string): GoogleProfile | null {
   const parts = jwt.split('.');
   if (parts.length < 2) return null;
   try {
-    const json = atob(parts[1].replace(/-/g, '+').replace(/_/g, '/'));
-    const raw = JSON.parse(json) as Record<string, unknown>;
+    const b64 = parts[1]!.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
+    const binary = atob(padded);
+    // Google encodes the claims as UTF-8; atob alone would mangle names
+    // outside Latin-1 (e.g. "മഹിത്" or "José").
+    const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+    const raw = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>;
     const sub = typeof raw.sub === 'string' ? raw.sub : '';
     if (!sub) return null;
     return {

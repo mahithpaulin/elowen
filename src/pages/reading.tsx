@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { PASSAGES } from '../data/reading/passages';
 import type { LessonData } from '../types';
-import { getSnapshot, recordReading, recordEvent } from '../storage/appstore';
+import { getSnapshot, recordReading } from '../storage/appstore';
 import { Card, Badge, Button, Eyebrow, Callout } from '../components/ui';
 import { ExerciseDeck, LessonSummary } from '../features/curriculum/ExerciseDeck';
 import { navigate } from '../app/router';
@@ -44,12 +44,13 @@ export function ReadingPage({ passageId }: { passageId?: string }) {
     );
   }
 
-  return <PassageReader passageIdc={passage.id} />;
+  return <PassageReader passageId={passage.id} />;
 }
 
-function PassageReader({ passageIdc }: { passageIdc: string }) {
-  const passage = PASSAGES.find((p) => p.id === passageIdc)!;
+function PassageReader({ passageId }: { passageId: string }) {
+  const passage = PASSAGES.find((p) => p.id === passageId)!;
   const [done, setDone] = useState<null | { percent: number; total: number }>(null);
+  const [attempt, setAttempt] = useState(0);
   const lesson: LessonData = {
     id: `reading/${passage.id}`,
     title: passage.title,
@@ -92,7 +93,10 @@ function PassageReader({ passageIdc }: { passageIdc: string }) {
           <LessonSummary
             percent={done.percent}
             topic="reading"
-            onRetry={() => setDone(null)}
+            onRetry={() => {
+              setDone(null);
+              setAttempt((a) => a + 1);
+            }}
           />
           <Callout>
             Optional next step: read the passage aloud once and past the word-count check in
@@ -106,10 +110,14 @@ function PassageReader({ passageIdc }: { passageIdc: string }) {
         </>
       ) : (
         <ExerciseDeck
+          key={attempt}
           lesson={lesson}
+          attempt={attempt}
           onFinish={async ({ percent }) => {
+            // recordReading writes the reading record AND the progress event —
+            // calling recordEvent here as well counted the attempt twice and
+            // gave the learner double XP for one passage.
             await recordReading(passage.id, percent);
-            await recordEvent({ kind: 'reading', topic: 'reading', refId: passage.id, score: percent, xp: Math.round((percent / 100) * 10) });
             setDone({ percent, total: passage.questions.length });
           }}
         />

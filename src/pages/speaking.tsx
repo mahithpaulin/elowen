@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { SPEAKING_EXERCISES } from '../data/labExercises';
 import { getSnapshot, saveSpeaking } from '../storage/appstore';
 import { analyseAudio, summariseDuration } from '../engines/audio/audio';
 import { compareReference } from '../engines/textdiff';
 import { asr, describeSpeechEngineAvailability } from '../engines/recognizers/asr';
-import { Button, Card, Badge, Eyebrow, Stat, Callout, EmptyState } from '../components/ui';
+import { Button, Card, Badge, Eyebrow, Stat, Callout, EmptyState, Progress } from '../components/ui';
 import { uid } from '../utils';
 import type { AudioReport } from '../types';
 
@@ -19,21 +19,28 @@ export function SpeakingPage() {
   const [asrStatus, setAsrStatus] = useState(asr.status);
   const [transcript, setTranscript] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // One take has one session id. Transcription updates that session; it does
+  // not create a second one (which would double the recorded work).
+  const sessionId = useRef<string | null>(null);
 
-  // poll the engine status object (it is mutated by the adapter)
+  // Poll the engine status object (it is mutated by the adapter). The poll
+  // re-renders this page every 500 ms — which used to tear the recorder down
+  // mid-take, because the recorder's effect depended on the callbacks below.
   useEffect(() => {
     const t = setInterval(() => setAsrStatus({ ...asr.status }), 500);
     return () => clearInterval(t);
   }, []);
 
-  const onDone = (s: Float32Array, sr: number) => {
+  const onDone = useCallback((s: Float32Array, sr: number) => {
     setSamples(s);
     setSampleRate(sr);
     setPhase('done');
     const first = analyseAudio(s, sr, null);
     setReport(first);
+    const id = uid();
+    sessionId.current = id;
     void saveSpeaking({
-      id: uid(),
+      id,
       ts: Date.now(),
       exerciseRef: ex.id,
       transcript: null,
@@ -41,7 +48,11 @@ export function SpeakingPage() {
       report: first,
       asrEngine: null,
     });
-  };
+  }, [ex.id]);
+
+  const onAbort = useCallback(() => {
+    setPhase('idle');
+  }, []);
 
   const onTranscribe = async () => {
     if (!samples) return;
@@ -54,7 +65,7 @@ export function SpeakingPage() {
       setReport(report2);
       const sim = text ? compareReference(ex.target, text).similarity : null;
       await saveSpeaking({
-        id: uid(),
+        id: sessionId.current ?? uid(),
         ts: Date.now(),
         exerciseRef: ex.id,
         transcript: text || null,
@@ -80,7 +91,21 @@ export function SpeakingPage() {
       <div className="grid2">
         <Card>
           <Eyebrow>Pick a practice task</Eyebrow>
-          <select value={exId} onChange={(e) => setExId(e.target.value)} style={selectStyle}>
+          <select
+            value={exId}
+            disabled={phase === 'recording'}
+            onChange={(e) => {
+              setExId(e.target.value);
+              // A finished take belongs to the task it was spoken against;
+              // switching tasks must not keep stale audio/transcript on screen.
+              setSamples(null);
+              setReport(null);
+              setTranscript(null);
+              setPhase('idle');
+              sessionId.current = null;
+            }}
+            style={selectStyle}
+          >
             {SPEAKING_EXERCISES.map((e) => (
               <option key={e.id} value={e.id}>
                 {e.title} — {e.level}
@@ -93,22 +118,24 @@ export function SpeakingPage() {
           <p className="tiny">Focus: {ex.focus}</p>
 
           {phase === 'recording' ? (
-            <Recorder
-              onDone={onDone}
-              onAbort={() => setPhase('idle')}
-            />
+            <Recorder onDone={onDone} onAbort={onAbort} />
           ) : (
-            <Button
-              primary
-              onClick={() => {
-                setPhase('recording');
-                setReport(null);
-                setTranscript(null);
-                setSamples(null);
-              }}
-            >
-              {phase === 'done' ? 'Record again' : 'Record'}
-            </Button>
+            <div className="row">
+              <Button
+                primary
+                onClick={() => {
+                  setPhase('recording');
+                  setReport(null);
+                  setTranscript(null);
+                  setSamples(null);
+                }}
+              >
+                {phase === 'done' ? '● Record again' : '● Record'}
+              </Button>
+              {phase === 'done' ? (
+                <span className="tiny">Tip: one breath per sentence.</span>
+              ) : null}
+            </div>
           )}
         </Card>
 
@@ -177,74 +204,138 @@ export function SpeakingPage() {
 
 /* ------------------------------- recorder ------------------------------- */
 
-let sharedAudioState: {
-  ctx: AudioContext | null;
-  stream: MediaStream | null;
-  buf: number[];
-} | null = null;
-
+/**
+ * Records one take.
+ *
+ * The callbacks are held in refs so the capture effect runs exactly once. The
+ * previous version listed them as effect dependencies: the page re-renders
+ * every 500 ms (the speech-engine status poll), which changed the callback
+ * identity, which tore down the effect — stopping the microphone half a
+ * second into every recording. The stop button was also wired with a raw
+ * DOM listener that only existed after the microphone permission resolved, so
+ * an early tap on "Stop" did nothing at all.
+ */
 function Recorder({ onDone, onAbort }: { onDone: (s: Float32Array, sr: number) => void; onAbort: () => void }) {
   const [err, setErr] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
-  const started = useRef(false);
+  const [level, setLevel] = useState(0);
+  const stopRef = useRef<(() => void) | null>(null);
+  const stopRequested = useRef(false);
+  const doneRef = useRef(onDone);
+  const abortRef = useRef(onAbort);
+  doneRef.current = onDone;
+  abortRef.current = onAbort;
 
   useEffect(() => {
-    if (started.current) return;
-    started.current = true;
     let cancelled = false;
+    let cleanup: (() => void) | null = null;
+    let raf = 0;
+
     void (async () => {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true },
+        });
         if (cancelled) {
           stream.getTracks().forEach((t) => t.stop());
           return;
         }
         const ctx = new AudioContext();
+        await ctx.resume().catch(() => undefined);
         const sr = ctx.sampleRate;
         const buf: number[] = [];
         const processor = ctx.createScriptProcessor(2048, 1, 1);
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 1024;
+        const source = ctx.createMediaStreamSource(stream);
+        source.connect(analyser);
+
+        const levels = new Float32Array(analyser.fftSize);
+        const tick = () => {
+          analyser.getFloatTimeDomainData(levels);
+          let sum = 0;
+          for (let i = 0; i < levels.length; i++) sum += levels[i]! * levels[i]!;
+          setLevel(Math.min(1, Math.sqrt(sum / levels.length) * 6));
+          raf = requestAnimationFrame(tick);
+        };
+        raf = requestAnimationFrame(tick);
+
         processor.onaudioprocess = (ev) => {
           const d = ev.inputBuffer.getChannelData(0);
           for (let i = 0; i < d.length; i++) buf.push(d[i]);
           setElapsed((e) => e + d.length / sr);
         };
-        ctx.createMediaStreamSource(stream).connect(processor);
+        source.connect(processor);
         // sink so the processor actually runs; muted output is fine
-        processor.connect(ctx.destination);
-        sharedAudioState = { ctx, stream, buf };
+        const gain = ctx.createGain();
+        gain.gain.value = 0;
+        processor.connect(gain);
+        gain.connect(ctx.destination);
+
+        let stopped = false;
         const stop = () => {
+          if (stopped) return;
+          stopped = true;
           if (buf.length === 0) {
             setErr('No audio received — check the microphone permission.');
-            onAbort();
+            abortRef.current();
           } else {
             const merged = new Float32Array(buf.length);
             merged.set(buf);
-            onDone(merged, sr);
+            doneRef.current(merged, sr);
           }
           stream.getTracks().forEach((t) => t.stop());
           void ctx.close();
-          sharedAudioState = null;
         };
-        document.getElementById('stop-recording')?.addEventListener('click', stop, { once: true });
+        stopRef.current = stop;
+        // A tap on Stop that landed while the permission prompt was still open
+        // must not be lost.
+        if (stopRequested.current) {
+          stopRequested.current = false;
+          stop();
+        }
+
+        cleanup = () => {
+          stopped = true;
+          stream.getTracks().forEach((t) => t.stop());
+          void ctx.close();
+        };
       } catch (e) {
-        setErr(e instanceof Error ? e.message : String(e));
-        onAbort();
+        if (!cancelled) {
+          setErr(e instanceof Error ? e.message : String(e));
+          abortRef.current();
+        }
       }
     })();
+
     return () => {
       cancelled = true;
-      sharedAudioState?.stream?.getTracks().forEach((t) => t.stop());
-      void sharedAudioState?.ctx?.close();
-      sharedAudioState = null;
+      cancelAnimationFrame(raf);
+      cleanup?.();
+      stopRef.current = null;
     };
-  }, [onDone, onAbort]);
+  }, []);
 
   return (
     <div>
-      <button className="btn primary" id="stop-recording">
-        ■ Stop — {summariseDuration(elapsed)}
-      </button>
-      <p className="tiny">Nothing is uploaded; audio lives only in this page.</p>
+      <div className="row" style={{ gap: 10 }}>
+        <button
+          className="btn recording"
+          onClick={() => {
+            if (stopRef.current) stopRef.current();
+            else stopRequested.current = true;
+          }}
+        >
+          {stopRef.current ? '■ Stop' : '… starting'} — {summariseDuration(elapsed)}
+        </button>
+        <div className="levelmeter" aria-label="Input level">
+          <span style={{ width: `${Math.round(level * 100)}%` }} />
+        </div>
+      </div>
+      <p className="tiny" style={{ marginTop: 8 }}>
+        Nothing is uploaded; audio lives only in this page. Tap stop when you finish the
+        sentence.
+      </p>
       {err ? <div className="feedback bad">Microphone: {err}</div> : null}
     </div>
   );
@@ -268,6 +359,7 @@ function Playback({ samples, sampleRate }: { samples: Float32Array; sampleRate: 
     const wav = float32ToWav(samples, sampleRate);
     return URL.createObjectURL(new Blob([wav], { type: 'audio/wav' }));
   }, [samples, sampleRate]);
+  useEffect(() => () => URL.revokeObjectURL(url), [url]);
   return <audio controls src={url} style={{ width: '100%', marginTop: 8 }} />;
 }
 
@@ -286,6 +378,11 @@ function TranscriptBox({ transcript, target }: { transcript: string; target: str
           <Badge tone={comparison.similarity >= 0.72 ? 'ok' : 'copper'}>
             word match {Math.round(comparison.similarity * 100)}%
           </Badge>
+          <p className="tiny" style={{ marginTop: 6 }}>
+            {comparison.matched} matched · {comparison.missing} missed or wrong · {comparison.extra}{' '}
+            extra
+          </p>
+          <Progress value={comparison.similarity * 100} />
           <div className="diff">
             {comparison.tokens.map((t, i) => (
               <span key={i} className={`tok ${t.kind}`}>
@@ -296,7 +393,8 @@ function TranscriptBox({ transcript, target }: { transcript: string; target: str
         </div>
       </div>
       <p className="tiny" style={{ marginTop: 8 }}>
-        Missed words are struck through. This score uses the same deterministic alignment as the reading tool.
+        Missed words are struck through. Extra words lower the score too — the same
+        deterministic alignment the reading tool uses.
       </p>
     </div>
   );

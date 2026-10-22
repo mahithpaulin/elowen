@@ -1,5 +1,14 @@
 /** Shared tiny helpers. */
 
+/** Splits the "unitId/lessonId" form used by recommendation targets. */
+export function parseLessonTarget(target: string): { unitId: string; lessonId: string } | null {
+  const parts = target.split('/');
+  if (parts.length !== 2) return null;
+  const [unitId, lessonId] = parts;
+  if (!unitId || !lessonId) return null;
+  return { unitId, lessonId };
+}
+
 export function toLevelPct(xp: number, min: number, max: number): number {
   if (max <= min) return 100;
   return Math.max(0, Math.min(100, Math.round(((xp - min) / (max - min)) * 100)));

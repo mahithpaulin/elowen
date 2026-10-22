@@ -147,32 +147,101 @@ export async function upsertSrs(card: SrsCard): Promise<void> {
   emit();
 }
 
+/**
+ * Updates the event belonging to a saved session instead of appending a new
+ * one. A speaking take and a handwriting photo each have a stable session id;
+ * re-saving the same session (e.g. after running OCR or transcription) used to
+ * add a second score and a second XP grant for one piece of work.
+ */
+async function putEventForRef(
+  kind: ActivityEvent['kind'],
+  refId: string,
+  fields: { xp: number; score?: number | null; label?: string },
+): Promise<void> {
+  const { score, ...rest } = fields;
+  const matches = state.snap.events.filter((e) => e.kind === kind && e.refId === refId);
+  const prev = matches[0];
+  if (!prev) {
+    await recordEvent({ kind, refId, ...rest, ...(score == null ? {} : { score }) });
+    return;
+  }
+  // Older builds could append a second event for the same session; collapse
+  // any duplicates the first time the session is saved again.
+  const extra = matches.slice(1);
+  if (extra.length > 0) {
+    await Promise.all(extra.map((e) => db.deleteKey('events', e.id)));
+    state.snap.events = state.snap.events.filter((e) => !extra.includes(e));
+  }
+  const next: ActivityEvent = { ...prev, ...rest };
+  // A re-run that cannot be scored must not keep an older score.
+  if (score == null) delete next.score;
+  else next.score = score;
+  await db.put('events', next);
+  state.snap.events = state.snap.events.map((e) => (e.id === next.id ? next : e));
+  emit();
+}
+
 export async function saveHandwriting(s: HandwritingSession): Promise<void> {
   await db.put('handwriting', s);
-  state.snap.handwriting = [s, ...state.snap.handwriting];
+  state.snap.handwriting = [s, ...state.snap.handwriting.filter((x) => x.id !== s.id)];
   emit();
   const avg = s.report.overall;
-  if (avg != null) {
-    await recordEvent({ kind: 'handwriting', refId: s.id, score: avg, xp: xpFromScore(avg) });
-  }
+  await putEventForRef('handwriting', s.id, {
+    score: avg,
+    xp: xpFromScore(avg ?? 0),
+  });
 }
 
 export async function saveSpeaking(s: SpeakingSession): Promise<void> {
   await db.put('speaking', s);
-  state.snap.speaking = [s, ...state.snap.speaking];
+  state.snap.speaking = [s, ...state.snap.speaking.filter((x) => x.id !== s.id)];
   emit();
-  const score = s.similarity != null ? s.similarity * 100 : 40;
-  await recordEvent({ kind: 'speaking', refId: s.id, score, xp: xpFromScore(score) });
+  // A run without a transcript has NO word-match score. Recording a made-up
+  // number here (the old code stored 40) put a fake score into the streaks,
+  // the topic averages and the dashboard — exactly what this app promises
+  // never to do. Unmeasurable stays unmeasured.
+  const score = s.similarity == null ? null : s.similarity * 100;
+  await putEventForRef('speaking', s.id, {
+    score,
+    xp: xpFromScore(score ?? 0),
+  });
 }
 
 export async function recordReading(passageId: string, scorePercent: number): Promise<void> {
   await db.put('reading', { passageId, score: scorePercent, ts: Date.now() });
-  await recordEvent({ kind: 'reading', topic: 'reading', refId: passageId, score: scorePercent, xp: xpFromScore(scorePercent) });
+  await recordEvent({
+    kind: 'reading',
+    topic: 'reading',
+    refId: passageId,
+    score: scorePercent,
+    xp: xpFromScore(scorePercent),
+  });
 }
 
-export async function logGrammarCheck(ruleCount: number): Promise<void> {
-  const ok = ruleCount === 0 ? 100 : Math.max(10, 100 - ruleCount * 12);
-  await recordEvent({ kind: 'grammar', topic: 'grammar', score: ok, xp: Math.round(ok * 0.12) });
+/**
+ * Records a grammar check. The score is the share of sentences in which the
+ * rule engine found nothing — a measured quantity with a stated meaning, not
+ * a "quality" judgement. The rule set cannot see every error, so the number
+ * is labelled "sentences with no findings" everywhere it is shown.
+ */
+export async function logGrammarCheck(text: string, issueCount: number): Promise<void> {
+  const sentences = Math.max(1, splitSentences(text).length);
+  const clean = Math.max(0, Math.round(((sentences - Math.min(issueCount, sentences)) / sentences) * 100));
+  await recordEvent({
+    kind: 'grammar',
+    topic: 'grammar',
+    score: clean,
+    xp: xpFromScore(clean),
+    label: `${sentences} sentence${sentences === 1 ? '' : 's'}, ${issueCount} finding${issueCount === 1 ? '' : 's'}`,
+  });
+}
+
+/** Splits text into sentences on terminal punctuation. */
+export function splitSentences(text: string): string[] {
+  return text
+    .split(/(?<=[.!?…])\s+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
 }
 
 export function xpFromScore(score: number): number {
@@ -190,6 +259,9 @@ export async function wipeEverything(): Promise<void> {
     speaking: [],
     settings: state.snap.settings,
   };
+  // The "sample data" flag lives in settings, and it survived the wipe — so
+  // pressing "Load sample data" after erasing did nothing at all, silently.
+  saveSettings({ demoSeeded: false });
   emit();
 }
 
@@ -242,7 +314,8 @@ export function computeRecommendations(snap: Snapshot): Recommendation[] {
   const recs: Recommendation[] = [];
   const now = Date.now();
   const since = now - RECENT_MS;
-  const recentEvents = snap.events.filter((e) => e.ts >= since);
+  // Sample data never drives a recommendation.
+  const recentEvents = realEvents(snap).filter((e) => e.ts >= since);
 
   // 1. weak topics
   const ta = topicAccuracy(recentEvents.filter((e) => e.score != null));
@@ -350,6 +423,7 @@ export function demoEvents(): ActivityEvent[] {
     topic,
     score,
     xp: xpFromScore(score),
+    demo: true,
   });
   return [
     mk(1, 'lesson', 'tenses', 70),
@@ -363,6 +437,16 @@ export function demoEvents(): ActivityEvent[] {
     mk(6, 'lesson', 'spelling', 88),
     mk(8, 'lesson', 'alphabet', 92),
   ];
+}
+
+/** Sample data is flagged on the event itself, so it can always be told apart. */
+export function isDemoEvent(e: ActivityEvent): boolean {
+  return e.demo === true;
+}
+
+/** Events that count as the learner's own work. */
+export function realEvents(snap: Snapshot): ActivityEvent[] {
+  return snap.events.filter((e) => !isDemoEvent(e));
 }
 
 export async function seedDemo(): Promise<void> {

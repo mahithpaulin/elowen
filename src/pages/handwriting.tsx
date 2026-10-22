@@ -58,6 +58,12 @@ function PracticeLab() {
   const [output, setOutput] = useState<AnalyzeOutput | null>(null);
   const [ocrOut, setOcrOut] = useState<OcrOutcome | null>(null);
   const [busy, setBusy] = useState(false);
+  // One analysed sheet = one session. OCR updates that session instead of
+  // adding a second score for the same work.
+  const sessionId = useRef<string | null>(null);
+  // The clean strokes-only render that was measured, reused for OCR so the
+  // ruled guide lines are not read as letters.
+  const cleanCanvas = useRef<HTMLCanvasElement>(document.createElement('canvas'));
 
   useEffect(() => {
     const c = canvasRef.current;
@@ -83,6 +89,7 @@ function PracticeLab() {
               setOutput(null);
               setOcrOut(null);
               strokes.current = [];
+              sessionId.current = null;
             }}
             style={selectStyle}
           >
@@ -105,6 +112,7 @@ function PracticeLab() {
             onPointerDown={(e) => {
               drawing.current = true;
               strokes.current.push([pointerPos(e)]);
+              sessionId.current = null;
               setDirty(true);
             }}
             onPointerMove={(e) => {
@@ -142,6 +150,7 @@ function PracticeLab() {
                 setDirty(false);
                 setOutput(null);
                 setOcrOut(null);
+                sessionId.current = null;
               }}>
                 Clear
               </Button>
@@ -180,11 +189,21 @@ function PracticeLab() {
     if (!c) return;
     setBusy(true);
     try {
-      const res = measureCanvas(c);
+      // Analyse a clean render of the strokes only. The ruled guide lines on
+      // the practice sheet are lighter than the paper but darker than the
+      // background, so the adaptive threshold picked them up as ink and the
+      // whole measurement was about the guide lines, not the writing.
+      const clean = cleanCanvas.current;
+      clean.width = c.width;
+      clean.height = c.height;
+      renderStrokes(clean, strokes.current, pen);
+      const res = measureCanvas(clean);
       setOutput(res.output);
-      // persist without OCR
+      // persist without OCR; a re-measure of the same sheet updates it
+      const id = sessionId.current ?? uid();
+      sessionId.current = id;
       await saveHandwriting({
-        id: uid(),
+        id,
         ts: Date.now(),
         source: source === 'canvas' ? 'canvas' : 'upload',
         exerciseRef,
@@ -197,12 +216,11 @@ function PracticeLab() {
   }
 
   async function runOcr() {
-    const c = canvasRef.current;
-    if (!c) return;
+    if (!cleanCanvas.current.width) return;
     setBusy(true);
     try {
-      await ocr.init(c);
-      const words = await ocr.recognize(c);
+      await ocr.init(cleanCanvas.current);
+      const words = await ocr.recognize(cleanCanvas.current);
       const ocrWords: OcrWord[] = wordsFromTess(words);
       const produced = ocrWords.map((w) => w.word).join(' ');
       const comparison = compareReference(ex.reference, produced);
@@ -211,8 +229,10 @@ function PracticeLab() {
       if (output) {
         const theOutput: AnalyzeOutput = { ...output, ocr: out };
         setOutput(theOutput);
+        const id = sessionId.current ?? uid();
+        sessionId.current = id;
         await saveHandwriting({
-          id: uid(),
+          id,
           ts: Date.now(),
           source: 'canvas',
           exerciseRef: ex.id,
@@ -234,14 +254,17 @@ function PracticeLab() {
 function AnalyzeLab() {
   const [output, setOutput] = useState<AnalyzeOutput | null>(null);
   const [refId, setRefId] = useState('');
+  const ref = HANDWRITING_EXERCISES.find((e) => e.id === refId) ?? null;
   const [preview, setPreview] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [ocrOut, setOcrOut] = useState<OcrOutcome | null>(null);
   const holdCanvas = useRef<HTMLCanvasElement>(document.createElement('canvas'));
+  // One analysed photo = one session. The optional OCR pass updates it instead
+  // of saving a second session (and a second XP grant) for the same image.
+  const sessionId = useRef<string | null>(null);
 
   const runOcr = async () => {
-    const ref = HANDWRITING_EXERCISES.find((e) => e.id === refId);
     if (!ref) return;
     setBusy(true);
     try {
@@ -255,7 +278,7 @@ function AnalyzeLab() {
         const merged: AnalyzeOutput = { ...output, ocr: out };
         setOutput(merged);
         await saveHandwriting({
-          id: uid(),
+          id: sessionId.current ?? uid(),
           ts: Date.now(),
           source: 'upload',
           exerciseRef: ref.id,
@@ -274,8 +297,9 @@ function AnalyzeLab() {
     setErr(null);
     setBusy(true);
     setOcrOut(null);
+    const url = URL.createObjectURL(file);
     try {
-      const img = await loadImageFromUrl(URL.createObjectURL(file));
+      const img = await loadImageFromUrl(url);
       const scale = Math.min(1, Math.sqrt(MAX_IMAGE_PIXELS / (img.width * img.height)));
       const c = holdCanvas.current;
       c.width = Math.round(img.width * scale);
@@ -290,8 +314,10 @@ function AnalyzeLab() {
       thumb.height = Math.max(1, Math.round(c.height * s));
       thumb.getContext('2d')!.drawImage(img, 0, 0, thumb.width, thumb.height);
       setPreview(thumb.toDataURL('image/png'));
+      const id = uid();
+      sessionId.current = id;
       await saveHandwriting({
-        id: uid(),
+        id,
         ts: Date.now(),
         source: 'upload' as const,
         exerciseRef: refId || undefined,
@@ -301,6 +327,7 @@ function AnalyzeLab() {
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
+      URL.revokeObjectURL(url);
       setBusy(false);
     }
   };
@@ -326,7 +353,16 @@ function AnalyzeLab() {
             }}
           />
         </label>
-        <select value={refId} onChange={(e) => setRefId(e.target.value)} style={{ ...selectStyle, marginTop: 10 }}>
+        <select
+          value={refId}
+          onChange={(e) => {
+            setRefId(e.target.value);
+            // The letter comparison is against the previously selected
+            // exercise; do not show it beside a different reference.
+            setOcrOut(null);
+          }}
+          style={{ ...selectStyle, marginTop: 10 }}
+        >
           <option value="">Optional: link a copy exercise (for the letter check)</option>
           {HANDWRITING_EXERCISES.map((e) => (
             <option key={e.id} value={e.id}>
@@ -342,7 +378,14 @@ function AnalyzeLab() {
 
       <div>
         {output ? (
-          <ResultsCard output={output} exerciseRef="" source={output.ocr ? 'upload' : 'upload'} ocrOut={ocrOut} busy={busy} />
+          <ResultsCard
+            output={output}
+            exerciseRef={ref ? ref.reference : ''}
+            source="upload"
+            ocrOut={ocrOut}
+            busy={busy}
+            onRunOcr={ref ? () => void runOcr() : undefined}
+          />
         ) : (
           <Card>
             <EmptyState title="No image analysed yet" note="Numbers appear here with explicit notes for anything that cannot be measured." />
@@ -496,6 +539,28 @@ function redraw(c: HTMLCanvasElement, strokes: Array<Array<{ x: number; y: numbe
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
   ctx.strokeStyle = '#182b26';
+  ctx.lineWidth = pen;
+  for (const s of strokes) {
+    if (!s.length) continue;
+    ctx.beginPath();
+    ctx.moveTo(s[0]!.x, s[0]!.y);
+    for (const p of s.slice(1)) ctx.lineTo(p.x, p.y);
+    ctx.stroke();
+  }
+}
+
+/** Draw only the strokes on a blank sheet — the version that gets measured. */
+function renderStrokes(
+  c: HTMLCanvasElement,
+  strokes: Array<Array<{ x: number; y: number }>>,
+  pen = 4,
+): void {
+  const ctx = c.getContext('2d')!;
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, c.width, c.height);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = '#000000';
   ctx.lineWidth = pen;
   for (const s of strokes) {
     if (!s.length) continue;

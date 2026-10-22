@@ -133,12 +133,15 @@ function componentSlant(bin: BinImage, b: CompBox): number | null {
   const denom = mu20 - mu02;
   if (Math.abs(denom) < 1e-9 && Math.abs(mu11) < 1e-9) return null;
   const theta = 0.5 * Math.atan2(2 * mu11, denom); // radians, from horizontal
-  let deg = (theta * 180) / Math.PI; // −90..90
-  // express as deviation from the vertical axis, picking the smaller angle
-  let v = deg; // angle from horizontal; vertical is ±90
-  if (v >= 0) v = 90 - v;
-  else v = -90 - v;
-  if (Math.abs(90 - Math.abs(v)) > 45) return null; // horizontal axis: not a letter stroke
+  const deg = (theta * 180) / Math.PI; // −90..90
+  // Express the axis as a deviation from the vertical:
+  //   vertical stroke (deg = ±90) → 0,  horizontal stroke (deg = 0) → ±90.
+  let v = deg >= 0 ? 90 - deg : -90 - deg;
+  // Keep only letter-like strokes: an axis more than 45° away from vertical is
+  // a horizontal bar (a cross-bar, a ruled line), not a letter body.
+  // The previous test had this inverted — it rejected vertical strokes and
+  // accepted horizontal ones, so the reported slant was meaningless.
+  if (Math.abs(v) > 45) return null;
   return v;
 }
 
@@ -287,14 +290,28 @@ export function qualityFromGray(w: number, h: number, gray: Uint8Array): Quality
   const warnings: string[] = [];
   // normalise sharpness: divide by pixel scale so scores compare across sizes
   const sharp = lap / Math.max(1, Math.min(w, h) / 800);
-  if (bright < 90) warnings.push('The photo looks quite dark — more light will improve the analysis.');
-  else if (bright > 235) warnings.push('The photo looks washed out — try softer lighting.');
+  // Fraction of pixels that are essentially white — a blown-out photo loses
+  // the edges of the strokes.
+  let blown = 0;
+  let crushed = 0;
+  for (let i = 0; i < gray.length; i++) {
+    if (gray[i]! >= 250) blown++;
+    else if (gray[i]! <= 5) crushed++;
+  }
+  const blownRatio = gray.length ? blown / gray.length : 0;
+  const crushedRatio = gray.length ? crushed / gray.length : 0;
+  if (bright < 80) warnings.push('The photo looks quite dark — more light will improve the analysis.');
+  else if (bright > 248) warnings.push('The photo looks washed out — try softer lighting.');
+  if (blownRatio > 0.45) warnings.push('Large parts of the photo are pure white — the strokes lose their edges.');
+  if (crushedRatio > 0.35) warnings.push('Large parts of the photo are pure black — the paper is too dark to read.');
   if (sharp < 140) warnings.push('The image is soft or blurred. Hold the camera steady or scan the page.');
   if (w * h < 220 * 180) warnings.push('The image is small. Use full-size originals when uploading.');
   const q = clamp(
     60 +
-      (bright >= 110 && bright <= 215 ? 20 : 5) +
-      (sharp >= 300 ? 20 : sharp >= 180 ? 10 : 0),
+      (bright >= 110 && bright <= 235 ? 20 : 5) +
+      (sharp >= 300 ? 20 : sharp >= 180 ? 10 : 0) -
+      (blownRatio > 0.45 ? 10 : 0) -
+      (crushedRatio > 0.35 ? 10 : 0),
     5,
     100,
   );

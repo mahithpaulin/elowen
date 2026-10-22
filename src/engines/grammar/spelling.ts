@@ -112,7 +112,8 @@ export const MISSPELLINGS: Record<string, string> = {
   feeled: 'felt',
   forgeted: 'forgot',
   gived: 'gave',
-  teh: 'the',
+  teached: 'taught',
+    teh: 'the',
   thay: 'they',
   thier: 'their',
   tommorow: 'tomorrow',
@@ -158,6 +159,12 @@ const CANDIDATE_CACHE = new Map<string, string | null>();
  * Suggest a correction for a word not in the dictionary:
  * first the authored misspelling table, then a bounded distance-1
  * dictionary scan. Returns null when no candidate exists.
+ *
+ * The scan only accepts a candidate that starts with the same letter. Real
+ * misspellings almost always keep the first letter ("teh" → "the",
+ * "recieve" → "receive"); candidates that do not are usually a *different*
+ * word ("kid" → "did", "car" → "can") and produced nonsense advice. The
+ * authored table carries the known exceptions.
  */
 export function suggestSpelling(word: string): string | null {
   const w = word.toLowerCase();
@@ -166,11 +173,16 @@ export function suggestSpelling(word: string): string | null {
   let best: string | null = MISSPELLINGS[w] ?? null;
   if (best == null) {
     const wl = w.length;
+    const first = w[0];
+    let bestLenDelta = Infinity;
     for (const cand of WORD_SET) {
       if (Math.abs(cand.length - wl) > 1) continue;
-      if (isEditDistanceOne(w, cand)) {
+      if (cand[0] !== first) continue;
+      if (!isEditDistanceOne(w, cand)) continue;
+      const delta = Math.abs(cand.length - wl);
+      if (delta < bestLenDelta || (delta === bestLenDelta && cand < best!)) {
         best = cand;
-        break;
+        bestLenDelta = delta;
       }
     }
   }

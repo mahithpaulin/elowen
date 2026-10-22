@@ -145,7 +145,7 @@ function Welcome({ onDemo }: { onDemo: () => Promise<void> }) {
           speaking practice around offline speech tools — all on your own device.
         </p>
         <div className="chiprow">
-          <span className="chip">No account</span>
+          <span className="chip">No account required</span>
           <span className="chip">No uploads</span>
           <span className="chip">No generative AI</span>
         </div>
